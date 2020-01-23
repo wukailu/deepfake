@@ -1,0 +1,1 @@
+DATA_DIR = "/data1/data/deepfake/dfdc_train"
