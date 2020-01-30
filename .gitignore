@@ -125,3 +125,6 @@ dmypy.json
 .pyre/
 *.iml
 .idea/
+*.csv
+*.pkl
+*.json

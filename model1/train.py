@@ -1,0 +1,173 @@
+import torch
+from tqdm import tqdm
+from apex import amp
+import numpy as np
+import os
+
+from utils import visualize_metrics, display_predictions_on_image
+from sklearn.metrics import roc_auc_score as extra_metric
+
+import foundations
+
+
+class Records:
+    def __init__(self):
+        self.train_losses, self.train_losses_wo_dropout, self.val_losses, self.test_losses = [], [], [], []
+        self.train_accs, self.train_accs_wo_dropout, self.val_accs, self.test_accs = [], [], [], []
+        self.train_custom_metrics, self.train_custom_metrics_wo_dropout, self.val_custom_metrics, self.test_custom_metrics = [], [], [], []
+        self.lrs = []
+
+    def write_to_records(self, **kwargs):
+        assert len(set(kwargs.keys()) - set(self.__dir__())) == 0, 'invalid arguments!'
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+    def return_attributes(self):
+        attributes = [i for i in self.__dir__() if
+                      not (i.startswith('__') and i.endswith('__') or i in ('write_to_records', 'return_attributes',
+                                                                            'get_metrics'))]
+        return attributes
+
+    def get_metrics(self):
+        return ['train_accs_wo_dropout', 'val_accs', 'test_accs', 'val_custom_metrics', 'test_custom_metrics',
+                'val_losses', 'test_losses']
+
+
+def train_one_epoch(epoch, model, train_dl, max_lr, optimizer, criterion, scheduler, records, record_eval):
+    model.train()
+    train_loss = 0
+    train_loss_eval = 0
+    train_tk = tqdm(train_dl, total=int(len(train_dl)), desc='Train Epoch')
+
+    optimizer.zero_grad()
+    total = 0
+    correct_count = 0
+    correct_count_eval = 0
+
+    for step, data in enumerate(train_tk):
+        real = data['real']
+        fake = data['fake']
+        batch_size = real.shape(0)
+
+        inputs = torch.cat((real, fake)).cuda()
+        labels = torch.cat((torch.zeros(batch_size), torch.ones(batch_size))).cuda()
+
+        if record_eval:
+            # eval with dropout turned off
+            model.eval()
+            with torch.no_grad():
+                outputs_eval = model(inputs)
+                _, predicted_eval = torch.max(outputs_eval.data, 1)
+                correct_count_eval += (predicted_eval == labels).sum().item()
+                loss_eval = criterion(outputs_eval, labels)
+
+            train_loss_eval += loss_eval.item()
+
+        model.train()
+        optimizer.zero_grad()
+        with torch.set_grad_enabled(True):
+            outputs = model(inputs)
+            _, predicted = torch.max(outputs.data, 1)
+
+            total += labels.size(0)
+            correct_count += (predicted == labels).sum().item()
+            loss = criterion(outputs, labels)
+            with amp.scale_loss(loss, optimizer) as scaled_loss:
+                scaled_loss.backward()
+            optimizer.step()
+
+            if scheduler is not None:
+                records.lrs += scheduler.get_lr()
+                scheduler.step()
+            else:
+                records.lrs.append(max_lr)
+
+        train_loss += loss.item()
+        train_tk.set_postfix(loss=train_loss / (step + 1), acc=correct_count / total)
+
+    records.train_losses_wo_dropout.append(train_loss_eval / (step + 1))
+    records.train_accs_wo_dropout.append(correct_count_eval / total)
+    records.train_losses.append(train_loss / (step + 1))
+    records.train_accs.append(correct_count / total)
+
+    print(f'Epoch {epoch}: train loss={records.train_losses[-1]:.4f} | train acc={records.train_accs[-1]:.4f}')
+    print(f'Epoch {epoch}: eval_ loss={records.train_losses_wo_dropout[-1]:.4f} | train acc={records.train_accs_wo_dropout[-1]:.4f}')
+
+
+def validate(model, val_dl, criterion, records):
+    # val
+    model.eval()
+    val_loss = 0
+    correct_count = 0
+    total = 0
+
+    all_labels = []
+    all_predictions = []
+
+    for data in val_dl:
+        batch_size = data['real'].shape(0)
+        inputs = torch.cat((data['real'], data['fake'])).cuda()
+        labels = torch.cat((torch.zeros(batch_size), torch.ones(batch_size))).cuda()
+
+        with torch.no_grad():
+            outputs = model(inputs)
+            _, predicted = torch.max(outputs.data, 1)
+
+            total += labels.size(0)
+            correct_count += (predicted == labels).sum().item()
+            val_loss += criterion(outputs, labels)
+
+        all_labels.append(labels.cpu().numpy())
+        all_predictions.append(predicted.cpu().numpy())
+
+    all_labels = np.concatenate(all_labels, axis=0)
+    all_predictions = np.concatenate(all_predictions, axis=0)
+    extra_score = extra_metric(all_labels, all_predictions)
+
+    records.val_losses.append(val_loss / len(val_dl))
+    records.val_accs.append(correct_count / total)
+    records.val_custom_metrics.append(extra_score)
+    print(f'\t base val loss={records.val_losses[-1]:.4f} | base val acc={records.val_accs[-1]:.4f} | '
+          f'base val {extra_metric.__name__}={records.val_custom_metrics[-1]:.4f}')
+
+
+def train(train_dl, val_dl, test_dl, val_dl_iter, model, optimizer, n_epochs, max_lr, scheduler, criterion, val_rate):
+    records = Records()
+    best_metric = 1e9
+
+    os.makedirs('checkpoints', exist_ok=True)
+
+    for epoch in range(n_epochs):
+        train_one_epoch(epoch, model, train_dl, max_lr, optimizer, criterion, scheduler, records, record_eval=False)
+        if epoch % val_rate == 0:
+            validate(model, val_dl, criterion, records)
+            # validate(model, test_dl, criterion, records)
+
+            selection_metric = getattr(records, "val_losses")[0]
+
+            if selection_metric <= best_metric:
+                print(f'>>> Saving best model metric={selection_metric:.4f} compared to previous best {best_metric:.4f}')
+                checkpoint = {'model': model,
+                              'optimizer': optimizer.state_dict()}
+
+                torch.save(checkpoint, 'checkpoints/best_model.pth')
+                foundations.save_artifact('checkpoints/best_model.pth', key='best_model_checkpoint')
+
+            display_filename = f'{epoch}_display.png'
+            display_predictions_on_image(model, val_dl.dataset.cached_path, val_dl_iter, name=display_filename)
+
+            # Save eyeball plot to Atlas GUI
+            foundations.save_artifact(display_filename, key=f'{epoch}_display')
+
+            # Save metrics plot
+            visualize_metrics(records, extra_metric=extra_metric, name='metrics.png')
+
+            # Save metrics plot to Atlas GUI
+            foundations.save_artifact('metrics.png', key='metrics_plot')
+
+    # Log metrics to GUI
+    max_index = np.argmax(getattr(records, 'val_losses'))
+
+    useful_metrics = records.get_metrics()
+    for metric in useful_metrics:
+        foundations.log_metric(metric, float(getattr(records, metric)[max_index]))

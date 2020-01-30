@@ -1,1 +1,5 @@
-DATA_DIR = "/data1/data/deepfake/dfdc_train"
+BASE = "/data1/data/deepfake/"
+DATA_DIR = BASE + "dfdc_train"
+meta_data_path = BASE + "dfdc_train/metadata_kailu.json"
+bbox_path = BASE + "bbox.json"
+cache_path = BASE + "faces/"
