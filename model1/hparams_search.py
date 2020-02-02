@@ -15,7 +15,7 @@ def generate_params():
               'use_lr_scheduler': int(np.random.choice([0, 1])),
               'scheduler_gamma': float(np.random.choice([0.95, 0.96, 0.94])),
               'use_hidden_layer': int(np.random.choice([0, 1])),
-              'backbone': str(np.random.choice(["resnet18, resnet34, resnet50"])),
+              'backbone': str(np.random.choice(["resnet18", "resnet34", "resnet50"])),
               'val_rate': 5,
               'data_path': settings.DATA_DIR,
               'metadata_path': settings.meta_data_path,
@@ -30,9 +30,9 @@ submitted_jobs = set()
 for job_ in range(NUM_JOBS):
     print(f"packaging job {job_}")
     hyper_params = generate_params()
-    while hyper_params in submitted_jobs:
+    while frozenset(hyper_params.items()) in submitted_jobs:
         hyper_params = generate_params()
-    submitted_jobs.add(hyper_params)
+    submitted_jobs.add(frozenset(hyper_params.items()))
     print(hyper_params)
-    foundations.submit(scheduler_config='scheduler', job_directory='.', command='main.py', params=hyper_params,
-                       stream_job_logs=False, num_gpus=1)
+    foundations.submit(scheduler_config='scheduler', job_directory='..', command='model1/main.py',
+                       params=hyper_params, stream_job_logs=False, num_gpus=1)

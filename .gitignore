@@ -128,3 +128,4 @@ dmypy.json
 *.csv
 *.pkl
 *.json
+/custom_docker_image/apex/
