@@ -15,3 +15,6 @@ worker:
     /data1/data/deepfake/:
       bind: /data1/data/deepfake/
       mode: rw
+    /home/kailu/.cache/torch/checkpoints:
+      bind: /root/.cache/torch/checkpoints
+      mode: rw

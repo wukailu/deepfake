@@ -91,12 +91,9 @@ def display_predictions_on_image(model, precomputed_cached_path, val_iter, name)
     model.eval()
     data = next(val_iter)
 
-    batch_size = data['real'].shape(0)
-    inputs = torch.cat((data['real'], data['fake'])).cuda()
-    labels = torch.cat((torch.zeros(batch_size), torch.ones(batch_size))).cuda()
+    inputs, labels = get_input_with_label(data)
     img_files = data['real_file'] + data['fake_file']
 
-    # TODO:
     with torch.no_grad():
         outputs = model(inputs)
         outputs_predicbilty = torch.nn.functional.softmax(outputs, dim=1)
@@ -122,3 +119,9 @@ def display_predictions_on_image(model, precomputed_cached_path, val_iter, name)
     plt.tight_layout()
     plt.savefig(name, format='png')
 
+
+def get_input_with_label(data: dict):
+    batch_size = data['real'].shape[0]
+    inputs = torch.cat((data['real'], data['fake'])).cuda()
+    labels = torch.cat((torch.zeros(batch_size), torch.ones(batch_size))).long().cuda()
+    return inputs, labels

@@ -4,10 +4,11 @@ from apex import amp
 import numpy as np
 import os
 
-from utils import visualize_metrics, display_predictions_on_image
+from utils import visualize_metrics, display_predictions_on_image, get_input_with_label
 from sklearn.metrics import roc_auc_score as extra_metric
 
 import foundations
+import settings
 
 
 class Records:
@@ -45,12 +46,7 @@ def train_one_epoch(epoch, model, train_dl, max_lr, optimizer, criterion, schedu
     correct_count_eval = 0
 
     for step, data in enumerate(train_tk):
-        real = data['real']
-        fake = data['fake']
-        batch_size = real.shape(0)
-
-        inputs = torch.cat((real, fake)).cuda()
-        labels = torch.cat((torch.zeros(batch_size), torch.ones(batch_size))).cuda()
+        inputs, labels = get_input_with_label(data)
 
         if record_eval:
             # eval with dropout turned off
@@ -105,9 +101,7 @@ def validate(model, val_dl, criterion, records):
     all_predictions = []
 
     for data in val_dl:
-        batch_size = data['real'].shape(0)
-        inputs = torch.cat((data['real'], data['fake'])).cuda()
-        labels = torch.cat((torch.zeros(batch_size), torch.ones(batch_size))).cuda()
+        inputs, labels = get_input_with_label(data)
 
         with torch.no_grad():
             outputs = model(inputs)
@@ -151,23 +145,29 @@ def train(train_dl, val_dl, test_dl, val_dl_iter, model, optimizer, n_epochs, ma
                               'optimizer': optimizer.state_dict()}
 
                 torch.save(checkpoint, 'checkpoints/best_model.pth')
-                foundations.save_artifact('checkpoints/best_model.pth', key='best_model_checkpoint')
+                if settings.USE_FOUNDATIONS:
+                    foundations.save_artifact('checkpoints/best_model.pth', key='best_model_checkpoint')
 
             display_filename = f'{epoch}_display.png'
             display_predictions_on_image(model, val_dl.dataset.cached_path, val_dl_iter, name=display_filename)
 
             # Save eyeball plot to Atlas GUI
-            foundations.save_artifact(display_filename, key=f'{epoch}_display')
+            if settings.USE_FOUNDATIONS:
+                foundations.save_artifact(display_filename, key=f'{epoch}_display')
 
             # Save metrics plot
             visualize_metrics(records, extra_metric=extra_metric, name='metrics.png')
 
             # Save metrics plot to Atlas GUI
-            foundations.save_artifact('metrics.png', key='metrics_plot')
+            if settings.USE_FOUNDATIONS:
+                foundations.save_artifact('metrics.png', key='metrics_plot')
 
     # Log metrics to GUI
     max_index = np.argmax(getattr(records, 'val_losses'))
 
     useful_metrics = records.get_metrics()
     for metric in useful_metrics:
-        foundations.log_metric(metric, float(getattr(records, metric)[max_index]))
+        if settings.USE_FOUNDATIONS:
+            foundations.log_metric(metric, float(getattr(records, metric)[max_index]))
+        else:
+            print(metric, float(getattr(records, metric)[max_index]))

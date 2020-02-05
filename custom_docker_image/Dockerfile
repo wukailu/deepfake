@@ -24,11 +24,16 @@ RUN conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/pk
  conda config --set show_channel_urls yes && \
  conda install python=3.7.1
 
+COPY apex/ apex/
+RUN pip install -v --no-cache-dir apex/
+
 COPY requirements.txt /tmp
 RUN pip install --no-cache-dir -r /tmp/requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple \
         && rm /tmp/requirements.txt
 
-COPY apex/ apex/
-RUN pip install -v --no-cache-dir apex/
-        
+RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple jsonschema
+RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple dill==0.2.8.2
+RUN pip install torch==1.4.0+cu100 torchvision==0.5.0+cu100 -f https://download.pytorch.org/whl/torch_stable.html
+RUN export PYTHONPATH=/job/job_source/model1/:/job/job_source/:$PYTHONPATH
+
 ENTRYPOINT ["python"]

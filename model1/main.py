@@ -4,23 +4,30 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.optim import lr_scheduler
 from apex import amp
+import time
 
+import sys
+sys.path.append('/job/job_source/')
+import settings
 from data_loader import create_dataloaders
 from model import get_trainable_params, create_model, print_model_params
 from train import train
 
-import foundations
-
+if settings.USE_FOUNDATIONS:
+    import foundations
+    params = foundations.load_parameters()
+    foundations.log_params(params)
+else:
+    import hparams_search
+    params = hparams_search.generate_params()
+    params['seed'] = 2018011328
+    print(params)
 
 # Fix random seed
-torch.manual_seed(2018011328)
-np.random.seed(2018011328)
+torch.manual_seed(params['seed'])
+np.random.seed(params['seed'])
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
-
-params = foundations.load_parameters()
-
-foundations.log_params(params)
 
 print('Creating datasets')
 # Get dataloaders
