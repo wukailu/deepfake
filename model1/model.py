@@ -1,5 +1,6 @@
 import torchvision.models as models
 import torch.nn as nn
+from efficientnet_pytorch import EfficientNet
 
 
 def check_model_block(model):
@@ -24,40 +25,62 @@ def get_trainable_params(model):
     return params_to_update
 
 
-def create_model(use_hidden_layer, dropout, backbone):
-    if backbone == 'resnet18':
-        model = models.resnet18(pretrained=True)
-    elif backbone == 'resnet34':
-        model = models.resnet34(pretrained=True)
-    elif backbone == 'resnet50':
-        model = models.resnet50(pretrained=True)
-    elif backbone == 'resnet101':
-        model = models.resnet101(pretrained=True)
-    else:
-        print("Unrecognized model name, using resnet18")
-        model = models.resnet18(pretrained=True)
-
-    in_features = model.fc.in_features
-    print(f'Input feature dim: {in_features}')
-
+def get_classifier(in_features, use_hidden_layer, dropout):
     if use_hidden_layer:
-        model.fc = nn.Sequential(
+        return  nn.Sequential(
             nn.Dropout(dropout),
             nn.Linear(in_features, in_features // 2),
             nn.ReLU(),
             nn.BatchNorm1d(in_features // 2),
             nn.Dropout(dropout),
-            nn.Linear(in_features // 2, 2)
+            nn.Linear(in_features // 2, 2),
+            nn.Softmax(dim=1)
         )
 
     else:
-        model.fc = nn.Sequential(
+        return nn.Sequential(
             nn.Dropout(dropout),
-            nn.Linear(in_features, 2)
+            nn.Linear(in_features, 2),
+            nn.Softmax(dim=1)
         )
-    
-    print(model)
 
+
+def create_model(use_hidden_layer, dropout, backbone, params):
+    if backbone == 1:
+        model = models.resnet18(pretrained=True)
+        model.fc = get_classifier(model.fc.in_features, use_hidden_layer, dropout)
+        params['batch_size'] = 256
+    elif backbone == 2:
+        model = models.resnet34(pretrained=True)
+        model.fc = get_classifier(model.fc.in_features, use_hidden_layer, dropout)
+    elif backbone == 3:
+        model = models.resnet50(pretrained=True)
+        model.fc = get_classifier(model.fc.in_features, use_hidden_layer, dropout)
+    elif backbone == 4:
+        model = models.resnet101(pretrained=True)
+        model.fc = get_classifier(model.fc.in_features, use_hidden_layer, dropout)
+    elif backbone == 5:
+        model = models.densenet121(pretrained=True)
+        model.classifier = get_classifier(model.classifier.in_features, use_hidden_layer, dropout)
+    elif backbone == 6:
+        model = EfficientNet.from_pretrained('efficientnet-b1', num_classes=23)
+        model._dropout = nn.Dropout(0)
+        model._fc = get_classifier(model._fc.in_features, use_hidden_layer, dropout)
+    elif backbone == 7:
+        model = EfficientNet.from_pretrained('efficientnet-b4', num_classes=23)
+        model._dropout = nn.Dropout(0)
+        model._fc = get_classifier(model._fc.in_features, use_hidden_layer, dropout)
+    elif backbone == 8:
+        model = EfficientNet.from_pretrained('efficientnet-b7', num_classes=23)
+        model._dropout = nn.Dropout(0)
+        model._fc = get_classifier(model._fc.in_features, use_hidden_layer, dropout)
+        params['batch_size'] = 32
+    else:
+        print("Unrecognized model name, using resnet18")
+        model = models.resnet18(pretrained=True)
+        model.fc = get_classifier(model.fc.in_features, use_hidden_layer, dropout)
+
+    print(model)
     model = model.cuda()
-    return model
+    return model, params
 

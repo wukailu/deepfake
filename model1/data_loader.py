@@ -11,15 +11,20 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 from torch.utils.data import DataLoader
 import settings
-import time
+from utils import isotropically_resize_image
 
 
 def collate_fn(batch: list):
     ret = {}
     for key in batch[0].keys():
         ret[key] = [item[key] for item in batch if item[key] is not None]
-    ret['real'] = torch.stack(ret['real'])
-    ret['fake'] = torch.stack(ret['fake'])
+    # print(len(ret['real']))
+    try:
+        ret['real'] = torch.stack(ret['real'])
+        ret['fake'] = torch.stack(ret['fake'])
+    except:
+        ret['real'] = torch.zeros((1, 3, 224, 224))
+        ret['fake'] = torch.zeros((1, 3, 224, 224))
     return ret
 
 
@@ -32,8 +37,7 @@ def val_data_filter(metadata_df):
 
 
 class DFDCDataset(Dataset):
-    def __init__(self, metadata: DataFrame, bbox: DataFrame, video_path: str, cached_path: str, transform,
-                 data_filter):
+    def __init__(self, metadata: DataFrame, bbox: DataFrame, video_path: str, cached_path: str, transform, data_filter):
         self.metadata_df = metadata
         self.real_filename = list(data_filter(metadata).index)
         self.bbox_df = bbox
@@ -52,7 +56,7 @@ class DFDCDataset(Dataset):
     def __len__(self):
         return len(self.real_filename)
 
-    def __get_transformed_face(self, filename: str, frame: int, bbox: np.ndarray = None) -> (
+    def __get_transformed_face(self, filename: str, frame: int) -> (
             torch.Tensor, pathlib.Path):
         cached_dir = self.cached_path / filename.split('.')[0]
         cached_file = cached_dir / (str(frame) + '.npy')
@@ -60,27 +64,11 @@ class DFDCDataset(Dataset):
         if cached_file.is_file():
             face = np.load(cached_file)
         else:
-            cap = cv2.VideoCapture(os.path.join(self.video_path, filename))
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame)  # 设置要获取的帧号
-            success = cap.grab()
-            _, frame_img = cap.retrieve()
-            # _, frame_img = cap.read()
-            if not _:
-                settings.un_normal_list.append(filename)
-                raise IOError(f"Reading {filename} Failed, frame = {frame}, path = {self.video_path}")
-            cap.release()
+            raise IOError("cache not found")
 
-            frame_img = cv2.cvtColor(frame_img, cv2.COLOR_BGR2RGB)
-            if bbox is None:
-                left, top, right, bottom = np.fromstring(self.bbox_df.at[(filename, frame, 0), 'bbox'][1:-1],
-                                                         sep=' ').astype(int)
-            else:
-                left, top, right, bottom = bbox
-            face = frame_img[top:bottom, left:right]
-            cached_dir.mkdir(exist_ok=True)
+        face = cv2.cvtColor(face, cv2.COLOR_BGR2RGB)
 
-            np.save(cached_file, face)
-
+        # face = isotropically_resize_image(face, 224)
         image = Image.fromarray(face)
         image = self.transform(image)
         return image, cached_file
@@ -99,16 +87,14 @@ class DFDCDataset(Dataset):
             real_image, real_file = self.__get_transformed_face(real_fn, frame)
 
             if fake_fn in self.bbox_index_fn and self.bbox_df.index.isin([(fake_fn, frame, 0)]).all():
-                print(f"getting fake {real_fn}, {frame}")
                 fake_image, fake_file = self.__get_transformed_face(fake_fn, frame)
             else:
-                bbox = np.fromstring(self.bbox_df.at[(real_fn, frame, 0), 'bbox'][1:-1], sep=' ').astype(int)
-                fake_image, fake_file = self.__get_transformed_face(fake_fn, frame, bbox=bbox)
+                fake_image, fake_file = self.__get_transformed_face(fake_fn, frame)
 
             return {'real': real_image, 'fake': fake_image, 'real_file': real_file, 'fake_file': fake_file}
 
         except IOError as e:
-            print(e)
+            # print(e)
             return {'real': None, 'fake': None, 'real_file': None, 'fake_file': None}
 
 
@@ -126,14 +112,14 @@ def get_transforms(level=0, image_size=224):
     elif level == 1:
         train_transforms = transforms.Compose([
             transforms.RandomHorizontalFlip(),
-            transforms.RandomAffine(degrees=20, scale=(.9, 1.1), shear=0),
+            transforms.RandomAffine(degrees=20, scale=(.8, 1.2), shear=0),
             transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
         ])
         tensor_transform = transforms.RandomErasing(scale=(0.02, 0.15), ratio=(0.3, 1.6))
     elif level == 2:
         train_transforms = transforms.Compose([
             transforms.RandomHorizontalFlip(),
-            transforms.RandomAffine(degrees=40, scale=(.9, 1.1), shear=0),
+            transforms.RandomAffine(degrees=40, scale=(.8, 1.2), shear=0),
             transforms.RandomPerspective(distortion_scale=0.2),
             transforms.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5),
         ])
@@ -141,7 +127,7 @@ def get_transforms(level=0, image_size=224):
     elif level == 3:
         train_transforms = transforms.Compose([
             transforms.RandomHorizontalFlip(),
-            transforms.RandomAffine(degrees=40, scale=(.9, 1.1), shear=0),
+            transforms.RandomAffine(degrees=40, scale=(.8, 1.2), shear=0),
             transforms.RandomPerspective(distortion_scale=0.2),
             transforms.ColorJitter(brightness=0.6, contrast=0.6, saturation=0.6),
         ])
@@ -149,15 +135,24 @@ def get_transforms(level=0, image_size=224):
     elif level == 4:
         train_transforms = transforms.Compose([
             transforms.RandomHorizontalFlip(),
+            transforms.RandomAffine(degrees=20, scale=(.8, 1.2), shear=0),
             transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3),
-            transforms.Resize(512),
-            transforms.RandomCrop(256, padding_mode='constant'),
+            transforms.Resize(336),
+            transforms.RandomCrop(224, padding_mode='constant'),
         ])
     elif level == 5:
         train_transforms = transforms.Compose([
             transforms.RandomHorizontalFlip(),
-            transforms.Resize(384),
+            transforms.RandomAffine(degrees=20, scale=(.8, 1.2), shear=0),
+            transforms.Resize(224),
             transforms.RandomCrop(128, padding_mode='constant'),
+        ])
+    elif level == 6:
+        train_transforms = transforms.Compose([
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomAffine(degrees=20, scale=(.8, 1.2), shear=0),
+            transforms.Resize(256),
+            transforms.RandomCrop(224, padding_mode='constant'),
         ])
     else:
         train_transforms = transforms.transforms.Compose([])
@@ -182,23 +177,25 @@ def create_dataloaders(params: dict):
     train_transforms, val_transforms = get_transforms(image_size=224, level=params['augment_level'])
     metadata = pd.read_json(params['metadata_path']).T
     bbox = pd.read_csv(params['bbox_path'], index_col=[0, 1, 2])
+    loader = 64
     train_dl = _create_dataloader(metadata[metadata['split_kailu'] == 'train'], bbox, params, train_transforms,
-                                  train_data_filter, batch_size=params['batch_size'], shuffle=True)
+                                  train_data_filter, batch_size=params['batch_size'], shuffle=True, num_workers=loader)
     val_dl = _create_dataloader(metadata[metadata['split_kailu'] == 'validation'], bbox, params, val_transforms,
-                                val_data_filter, batch_size=params['batch_size'], shuffle=False)
+                                val_data_filter, batch_size=params['batch_size'], shuffle=False, num_workers=loader)
     test_dl = _create_dataloader(metadata[metadata['split_kailu'] == 'test'], bbox, params, val_transforms,
-                                 val_data_filter, batch_size=params['batch_size'], shuffle=False)
+                                 val_data_filter, batch_size=params['batch_size'], shuffle=False, num_workers=loader)
 
     return train_dl, val_dl, test_dl, iter(val_dl)
 
 
 def _create_dataloader(metadata: DataFrame, bbox: DataFrame, params: dict, transform, data_filter,
-                       batch_size=64, num_workers=0, shuffle=True):
+                       batch_size=64, num_workers=64, shuffle=True):
     assert len(metadata) != 0, f'metadata are empty'
 
     ds = DFDCDataset(metadata=metadata, bbox=bbox, video_path=params['data_path'], cached_path=params['cache_path'],
                      transform=transform, data_filter=data_filter)
-    dl = DataLoader(ds, batch_size=batch_size, num_workers=num_workers, shuffle=shuffle, collate_fn=collate_fn)
+    dl = DataLoader(ds, batch_size=batch_size, num_workers=num_workers, shuffle=shuffle, collate_fn=collate_fn,
+                    drop_last=True)
 
     print(f"data: {len(ds)}")
     return dl

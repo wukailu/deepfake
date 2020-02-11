@@ -9,12 +9,16 @@ num_gpus: 1
 
 worker:
   image: dfdc:model1
-  shm_size: 128G
 
   volumes:
+    /dev/shm:
+      bind: /dev/shm
+      mode: rw
+
     /data1/data/deepfake/:
       bind: /data1/data/deepfake/
       mode: rw
+
     /home/kailu/.cache/torch/checkpoints:
       bind: /root/.cache/torch/checkpoints
       mode: rw

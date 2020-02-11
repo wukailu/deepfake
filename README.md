@@ -19,3 +19,9 @@
   * Take more frames
     * 13, 43, 53 frames per video（大于20帧后，效果不显著）
   * 根据人脸个数，分类讨论（未开始）
+
+
+* 预处理
+  * split dataset
+  * extract all faces(partial)
+  * 

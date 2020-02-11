@@ -16,31 +16,32 @@ from train import train
 if settings.USE_FOUNDATIONS:
     import foundations
     params = foundations.load_parameters()
-    foundations.log_params(params)
+    # Fix random seed
+    torch.manual_seed(params['seed'])
+    np.random.seed(params['seed'])
 else:
+    # Fix random seed
+    seed = np.random.randint(2e9) # 2018011328
+    torch.manual_seed(seed)
+    np.random.seed(seed)
     import hparams_search
     params = hparams_search.generate_params()
-    params['seed'] = 2018011328
+    params['seed'] = seed
     print(params)
 
-# Fix random seed
-torch.manual_seed(params['seed'])
-np.random.seed(params['seed'])
+    # params = {'batch_size': 64, 'n_epochs': 100, 'weight_decay': 0.0001, 'dropout': 0.7, 'augment_level': 3, 'max_lr': 0.0003, 'use_lr_scheduler': 0, 'scheduler_gamma': 0.95, 'use_hidden_layer': 0, 'backbone': 'resnet34', 'val_rate': 1, 'data_path': '/data1/data/deepfake/dfdc_train', 'metadata_path': '/data1/data/deepfake/dfdc_train/metadata_kailu.json', 'bbox_path': '/data1/data/deepfake/bbox_real.csv', 'cache_path': '/data1/data/deepfake/face/', 'seed': 1378744497}
+
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
-
-print('Creating datasets')
-# Get dataloaders
-train_dl, val_dl, test_dl, val_dl_iter = create_dataloaders(params)
-# train_dl, val_base_dl, val_augment_dl, display_dl_iter = create_dataloaders(params)
 
 print('Creating loss function')
 # Loss function
 criterion = nn.CrossEntropyLoss()
+# criterion = nn.MSELoss()
 
 print('Creating model')
 # Create model, freeze layers and change last layer
-model = create_model(bool(params['use_hidden_layer']), params['dropout'], params['backbone'])
+model, params = create_model(bool(params['use_hidden_layer']), params['dropout'], params['backbone'], params)
 _ = print_model_params(model)
 params_to_update = get_trainable_params(model)
 
@@ -51,11 +52,17 @@ model, optimizer = amp.initialize(model, optimizer, opt_level='O1', verbosity=0)
 
 # Learning rate scheme
 if bool(params['use_lr_scheduler']):
-    step_size_up = int(params['n_epochs'] * len(train_dl) * 0.3)
-    step_size_down = params['n_epochs'] * len(train_dl) - step_size_up
     scheduler = lr_scheduler.ExponentialLR(optimizer, gamma=params['scheduler_gamma'])
 else:
     scheduler = None
+
+print('Creating datasets')
+# Get dataloaders
+train_dl, val_dl, test_dl, val_dl_iter = create_dataloaders(params)
+# train_dl, val_base_dl, val_augment_dl, display_dl_iter = create_dataloaders(params)
+
+if settings.USE_FOUNDATIONS:
+    foundations.log_params(params)
 
 print('Training start..')
 # Train
