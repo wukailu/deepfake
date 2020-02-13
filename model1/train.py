@@ -86,7 +86,8 @@ def train_one_epoch(epoch, model, train_dl, max_lr, optimizer, criterion, schedu
     records.train_accs.append(correct_count / total)
 
     print(f'Epoch {epoch}: train loss={records.train_losses[-1]:.4f} | train acc={records.train_accs[-1]:.4f}')
-    print(f'Epoch {epoch}: eval_ loss={records.train_losses_wo_dropout[-1]:.4f} | train acc={records.train_accs_wo_dropout[-1]:.4f}')
+    print(
+        f'Epoch {epoch}: eval_ loss={records.train_losses_wo_dropout[-1]:.4f} | train acc={records.train_accs_wo_dropout[-1]:.4f}')
 
 
 def validate(model, val_dl, criterion, records):
@@ -140,7 +141,8 @@ def train(train_dl, val_dl, test_dl, val_dl_iter, model, optimizer, n_epochs, ma
 
             if selection_metric <= best_metric:
                 best_metric = selection_metric
-                print(f'>>> Saving best model metric={selection_metric:.4f} compared to previous best {best_metric:.4f}')
+                print(
+                    f'>>> Saving best model metric={selection_metric:.4f} compared to previous best {best_metric:.4f}')
                 checkpoint = {'model': model,
                               'optimizer': optimizer.state_dict()}
 
@@ -150,9 +152,13 @@ def train(train_dl, val_dl, test_dl, val_dl_iter, model, optimizer, n_epochs, ma
 
             # Save eyeball plot to Atlas GUI
             if settings.USE_FOUNDATIONS:
-                # TODO: bugs raise StopIteration
                 display_filename = f'{epoch}_display.png'
-                display_predictions_on_image(model, val_dl.dataset.cached_path, val_dl_iter, name=display_filename)
+                try:
+                    data = next(val_dl_iter)
+                except:
+                    val_dl_iter = iter(val_dl)
+                    data = next(val_dl_iter)
+                display_predictions_on_image(model, data, name=display_filename)
                 foundations.save_artifact(display_filename, key=f'{epoch}_display')
 
             # Save metrics plot

@@ -1,6 +1,10 @@
 BASE = "/data1/data/deepfake/"
 DATA_DIR = BASE + "dfdc_train"
-meta_data_path = DATA_DIR + "/metadata_kailu_437.json"
+meta_data_path = [
+    DATA_DIR + "/metadata_kailu.json",
+    DATA_DIR + "/metadata_kailu_hard.json",
+    DATA_DIR + "/metadata_kailu_460.json",
+]
 bbox_path = BASE + "bbox_real.csv"
 cache_path = BASE + "faces/"
 USE_FOUNDATIONS = True

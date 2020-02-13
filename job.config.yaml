@@ -15,7 +15,7 @@ worker:
       bind: /dev/shm
       mode: rw
 
-    /data1/data/deepfake/:
+    /data/deepfake/:
       bind: /data1/data/deepfake/
       mode: rw
 

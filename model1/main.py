@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.optim import lr_scheduler
 from apex import amp
-import time
+import random
 
 import sys
 sys.path.append('/job/job_source/')
@@ -19,17 +19,21 @@ if settings.USE_FOUNDATIONS:
     # Fix random seed
     torch.manual_seed(params['seed'])
     np.random.seed(params['seed'])
+    random.seed(params['seed'])
 else:
     # Fix random seed
     seed = np.random.randint(2e9) # 2018011328
     torch.manual_seed(seed)
     np.random.seed(seed)
+    random.seed(seed)
     import hparams_search
     params = hparams_search.generate_params()
     params['seed'] = seed
     print(params)
 
     # params = {'batch_size': 64, 'n_epochs': 100, 'weight_decay': 0.0001, 'dropout': 0.7, 'augment_level': 3, 'max_lr': 0.0003, 'use_lr_scheduler': 0, 'scheduler_gamma': 0.95, 'use_hidden_layer': 0, 'backbone': 'resnet34', 'val_rate': 1, 'data_path': '/data1/data/deepfake/dfdc_train', 'metadata_path': '/data1/data/deepfake/dfdc_train/metadata_kailu.json', 'bbox_path': '/data1/data/deepfake/bbox_real.csv', 'cache_path': '/data1/data/deepfake/face/', 'seed': 1378744497}
+
+params['metadata_path'] = settings.meta_data_path[params['metadata_path']]
 
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
@@ -61,8 +65,8 @@ print('Creating datasets')
 train_dl, val_dl, test_dl, val_dl_iter = create_dataloaders(params)
 # train_dl, val_base_dl, val_augment_dl, display_dl_iter = create_dataloaders(params)
 
-if settings.USE_FOUNDATIONS:
-    foundations.log_params(params)
+# if settings.USE_FOUNDATIONS:
+#     foundations.log_params(params)
 
 print('Training start..')
 # Train
