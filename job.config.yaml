@@ -1,5 +1,5 @@
 # Project config #
-project_name: 'DeepFake-Detection'
+project_name: 'DeepFake-Detection-metadata-search'
 log_level: INFO
 
 # Worker config #
@@ -16,7 +16,7 @@ worker:
       mode: rw
 
     /data/deepfake/:
-      bind: /data1/data/deepfake/
+      bind: /data/deepfake/
       mode: rw
 
     /home/kailu/.cache/torch/checkpoints:

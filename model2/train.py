@@ -4,7 +4,7 @@ from apex import amp
 import numpy as np
 import os
 
-from model1.utils import visualize_metrics, display_predictions_on_image, get_input_with_label
+from model2.utils import visualize_metrics, display_predictions_on_image, get_input_with_label
 from sklearn.metrics import roc_auc_score as extra_metric
 
 import foundations
@@ -33,7 +33,7 @@ class Records:
         return ['train_losses', 'val_accs', 'val_custom_metrics', 'val_losses']
 
 
-def train_one_epoch(epoch, model, train_dl, max_lr, optimizer, criterion, scheduler, records, record_eval):
+def train_one_epoch(epoch, model, train_dl, max_lr, optimizer, criterion, scheduler, records):
     model.train()
     train_loss = 0
     train_loss_eval = 0
@@ -47,25 +47,15 @@ def train_one_epoch(epoch, model, train_dl, max_lr, optimizer, criterion, schedu
     for step, data in enumerate(train_tk):
         inputs, labels = get_input_with_label(data)
 
-        if record_eval:
-            # eval with dropout turned off
-            model.eval()
-            with torch.no_grad():
-                outputs_eval = model(inputs)
-                _, predicted_eval = torch.max(outputs_eval.data, 1)
-                correct_count_eval += (predicted_eval == labels).sum().item()
-                loss_eval = criterion(outputs_eval, labels)
-
-            train_loss_eval += loss_eval.item()
-
         model.train()
         optimizer.zero_grad()
         with torch.set_grad_enabled(True):
             outputs = model(inputs)
-            _, predicted = torch.max(outputs.data, 1)
+            predicted = torch.sigmoid(outputs.data)
 
             total += labels.size(0)
             correct_count += (predicted == labels).sum().item()
+
             loss = criterion(outputs, labels)
             with amp.scale_loss(loss, optimizer) as scaled_loss:
                 scaled_loss.backward()
@@ -105,14 +95,15 @@ def validate(model, val_dl, criterion, records):
 
         with torch.no_grad():
             outputs = model(inputs)
-            _, predicted = torch.max(outputs.data, 1)
+            predicted = torch.sigmoid(outputs.data)
 
             total += labels.size(0)
+            # TODO: calc metrics
             correct_count += (predicted == labels).sum().item()
             val_loss += criterion(outputs, labels)
 
-        all_labels.append(labels.cpu().numpy())
-        all_predictions.append(predicted.cpu().numpy())
+        all_labels.append(labels.data.cpu().numpy())
+        all_predictions.append(predicted.data.cpu().numpy())
 
     all_labels = np.concatenate(all_labels, axis=0)
     all_predictions = np.concatenate(all_predictions, axis=0)
@@ -132,7 +123,7 @@ def train(train_dl, val_dl, test_dl, val_dl_iter, model, optimizer, n_epochs, ma
     os.makedirs('checkpoints', exist_ok=True)
 
     for epoch in range(n_epochs):
-        train_one_epoch(epoch, model, train_dl, max_lr, optimizer, criterion, scheduler, records, record_eval=False)
+        train_one_epoch(epoch, model, train_dl, max_lr, optimizer, criterion, scheduler, records)
         if epoch % val_rate == 0:
             validate(model, val_dl, criterion, records)
             # validate(model, test_dl, criterion, records)

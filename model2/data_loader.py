@@ -9,38 +9,28 @@ from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
 from torch.utils.data import DataLoader
-import settings
 import random
 
 
 def collate_fn(batch: list):
+    # TODO: change this for segmentation
     ret = {}
     for key in batch[0].keys():
         ret[key] = [item[key] for item in batch if item[key] is not None]
-    # print(len(ret['real']))
     try:
         ret['real'] = torch.stack(ret['real'])
         ret['fake'] = torch.stack(ret['fake'])
     except:
+        print("len(real) == 0")
         ret['real'] = torch.zeros((1, 3, 224, 224))
         ret['fake'] = torch.zeros((1, 3, 224, 224))
     return ret
 
 
-def train_data_filter(metadata_df):
-    return metadata_df[(metadata_df['label'] == 'REAL') & (metadata_df['person_num'] == 1)]
-
-
-def val_data_filter(metadata_df):
-    return metadata_df[metadata_df['label'] == 'REAL']
-
-
 class DFDCDataset(Dataset):
-    def __init__(self, metadata: DataFrame, bbox: DataFrame, params: dict, transform, data_filter):
+    def __init__(self, metadata: DataFrame, params: dict, transform):
         self.metadata_df = metadata
-        self.real_filename = list(data_filter(metadata).index)
-        self.bbox_df = bbox
-        self.bbox_index_fn = set(bbox.index.get_level_values(0))
+        self.real_filename = list(metadata.index)
         self.transform = transform
         self.same_transform = params['same_transform']
 
@@ -59,19 +49,15 @@ class DFDCDataset(Dataset):
 
     def __get_transformed_face(self, filename: str, frame: int) -> (torch.Tensor, pathlib.Path):
         cached_dir = self.cached_path / filename.split('.')[0]
-        cached_file = cached_dir / (str(frame) + '.png')
+        cached_file = cached_dir / (str(frame) + '.jpg')
 
         if cached_file.is_file():
-            with open(cached_file, 'rb') as f:
-                face = Image.open(f)
-                face.load()
-            # face = np.load(cached_file)
+            img = cv2.imread(cached_file)
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         else:
             raise IOError("cache not found")
 
-        assert face.size == (224, 224)
-        # image = Image.fromarray(face)
-        image = self.transform(face)
+        image = self.transform(Image.fromarray(img))
         return image, cached_file
 
     def __getitem__(self, idx: int):
@@ -79,11 +65,7 @@ class DFDCDataset(Dataset):
         fake_fn = np.random.choice(self.real2fakes[real_fn])
 
         try:
-            if real_fn not in self.bbox_index_fn:
-                settings.un_normal_list.append(real_fn)
-                raise IOError("real_fn not found")
-            frames = self.bbox_df.xs(real_fn, level=0).index.get_level_values(0)
-            frame = np.random.choice(frames)
+            frame = np.random.choice(list(range(0, 300, 13)))
 
             temp_seed = np.random.randint(0, 2e9)
             if self.same_transform:
@@ -99,6 +81,7 @@ class DFDCDataset(Dataset):
 
 
 def get_transforms(params, image_size=224):
+    # TODO: recalc mean and std
     pre_trained_mean, pre_trained_std = [0.439, 0.328, 0.304], [0.232, 0.206, 0.201]
     tensor_transform = []
 
@@ -123,9 +106,6 @@ def get_transforms(params, image_size=224):
             tensor_transform.append(transforms.RandomErasing(scale=(0.02, 0.15), ratio=(0.3, 1.6)))
         elif params['RandomErasing'] == 2:
             tensor_transform.append(transforms.RandomErasing(scale=(0.1, 0.5), ratio=(0.2, 5)))
-    elif params['RandomCrop'] != 0:
-        train_transforms.append(transforms.Resize(image_size + 32))
-        train_transforms.append(transforms.RandomCrop(image_size, padding_mode='constant'))
 
     train_transforms = transforms.Compose(train_transforms)
     tensor_transform = transforms.Compose(tensor_transform)
@@ -149,23 +129,19 @@ def get_transforms(params, image_size=224):
 def create_dataloaders(params: dict):
     train_transforms, val_transforms = get_transforms(params, image_size=224)
     metadata = pd.read_json(params['metadata_path']).T
-    bbox = pd.read_csv(params['bbox_path'], index_col=[0, 1, 2])
     loader = 64
-    train_dl = _create_dataloader(metadata[metadata['split_kailu'] == 'train'], bbox, params, train_transforms,
-                                  train_data_filter, shuffle=True, num_workers=loader)
-    val_dl = _create_dataloader(metadata[metadata['split_kailu'] == 'validation'], bbox, params, val_transforms,
-                                val_data_filter, shuffle=False, num_workers=loader)
-    test_dl = _create_dataloader(metadata[metadata['split_kailu'] == 'test'], bbox, params, val_transforms,
-                                 val_data_filter, shuffle=False, num_workers=loader)
+    train_dl = _create_dataloader(metadata[metadata['split_kailu'] == 'train'], params, train_transforms,
+                                  shuffle=True, num_workers=loader)
+    val_dl = _create_dataloader(metadata[metadata['split_kailu'] == 'validation'], params, val_transforms,
+                                shuffle=False, num_workers=loader)
+    test_dl = _create_dataloader(metadata[metadata['split_kailu'] == 'test'], params, val_transforms,
+                                 shuffle=False, num_workers=loader)
 
     return train_dl, val_dl, test_dl, iter(val_dl)
 
 
-def _create_dataloader(metadata: DataFrame, bbox: DataFrame, params: dict, transform, data_filter,
-                       num_workers=4, shuffle=True):
-    assert len(metadata) != 0, f'metadata are empty'
-
-    ds = DFDCDataset(metadata=metadata, bbox=bbox, params=params, transform=transform, data_filter=data_filter)
+def _create_dataloader(metadata: DataFrame, params: dict, transform, num_workers=4, shuffle=True):
+    ds = DFDCDataset(metadata=metadata, params=params, transform=transform)
     dl = DataLoader(ds, batch_size=params['batch_size'], num_workers=num_workers, shuffle=shuffle,
                     collate_fn=collate_fn, drop_last=True)
 
