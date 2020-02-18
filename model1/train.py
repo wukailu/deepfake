@@ -158,8 +158,8 @@ def train(train_dl, val_dl, test_dl, val_dl_iter, model, optimizer, n_epochs, ma
                 except:
                     val_dl_iter = iter(val_dl)
                     data = next(val_dl_iter)
-                display_predictions_on_image(model, data, name=display_filename)
-                foundations.save_artifact(display_filename, key=f'{epoch}_display')
+                # display_predictions_on_image(model, data, name=display_filename)
+                # foundations.save_artifact(display_filename, key=f'{epoch}_display')
 
             # Save metrics plot
             visualize_metrics(records, extra_metric=extra_metric, name='metrics.png')
