@@ -3,7 +3,6 @@ import numpy as np
 import pandas as pd
 from pandas import DataFrame
 
-import cv2
 import torch
 from PIL import Image
 from torch.utils.data import Dataset
@@ -65,12 +64,10 @@ class DFDCDataset(Dataset):
             with open(cached_file, 'rb') as f:
                 face = Image.open(f)
                 face.load()
-            # face = np.load(cached_file)
         else:
             raise IOError("cache not found")
 
         assert face.size == (224, 224)
-        # image = Image.fromarray(face)
         image = self.transform(face)
         return image, cached_file
 
@@ -79,9 +76,6 @@ class DFDCDataset(Dataset):
         fake_fn = np.random.choice(self.real2fakes[real_fn])
 
         try:
-            if real_fn not in self.bbox_index_fn:
-                settings.un_normal_list.append(real_fn)
-                raise IOError("real_fn not found")
             frames = self.bbox_df.xs(real_fn, level=0).index.get_level_values(0)
             frame = np.random.choice(frames)
 
@@ -94,7 +88,7 @@ class DFDCDataset(Dataset):
             fake_image, fake_file = self.__get_transformed_face(fake_fn, frame)
 
             return {'real': real_image, 'fake': fake_image, 'real_file': real_file, 'fake_file': fake_file}
-        except IOError as e:
+        except (IOError, KeyError) as e:
             return {'real': None, 'fake': None, 'real_file': None, 'fake_file': None}
 
 

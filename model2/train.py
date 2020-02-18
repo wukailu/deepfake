@@ -3,168 +3,132 @@ from tqdm import tqdm
 from apex import amp
 import numpy as np
 import os
+from torch.utils.tensorboard import SummaryWriter
 
-from model2.utils import visualize_metrics, display_predictions_on_image, get_input_with_label
-from sklearn.metrics import roc_auc_score as extra_metric
+from model2.utils import Meter, Unnormalize
+from model2.data_loader import training_mean, training_std
 
 import foundations
 import settings
 
 
-class Records:
-    def __init__(self):
-        self.train_losses, self.train_losses_wo_dropout, self.val_losses = [], [], []
-        self.train_accs, self.train_accs_wo_dropout, self.val_accs = [], [], []
-        self.train_custom_metrics, self.train_custom_metrics_wo_dropout, self.val_custom_metrics = [], [], []
-        self.lrs = []
+class Trainer(object):
+    '''This class takes care of training and validation of our model'''
 
-    def write_to_records(self, **kwargs):
-        assert len(set(kwargs.keys()) - set(self.__dir__())) == 0, 'invalid arguments!'
-        for k, v in kwargs.items():
-            setattr(self, k, v)
+    def __init__(self, train_dl, val_dl, test_dl, model: torch.nn.Module, optimizer, n_epochs, max_lr, scheduler,
+                 criterion):
+        self.train_dl = train_dl
+        self.val_dl = val_dl
+        self.test_dl = test_dl
+        self.visual_iter = iter(val_dl)
+        self.unnorm = Unnormalize(training_mean, training_std)
 
-    def return_attributes(self):
-        attributes = [i for i in self.__dir__() if
-                      not (i.startswith('__') and i.endswith('__') or i in ('write_to_records', 'return_attributes',
-                                                                            'get_metrics'))]
-        return attributes
+        self.model = model
+        self.optimizer = optimizer
+        self.num_epochs = n_epochs
+        self.lr = max_lr
+        self.scheduler = scheduler
+        self.criterion = criterion
 
-    def get_useful_metrics(self):
-        return ['train_losses', 'val_accs', 'val_custom_metrics', 'val_losses']
-
-
-def train_one_epoch(epoch, model, train_dl, max_lr, optimizer, criterion, scheduler, records):
-    model.train()
-    train_loss = 0
-    train_loss_eval = 0
-    train_tk = tqdm(train_dl, total=int(len(train_dl)), desc='Train Epoch')
-
-    optimizer.zero_grad()
-    total = 0
-    correct_count = 0
-    correct_count_eval = 0
-
-    for step, data in enumerate(train_tk):
-        inputs, labels = get_input_with_label(data)
-
-        model.train()
-        optimizer.zero_grad()
-        with torch.set_grad_enabled(True):
-            outputs = model(inputs)
-            predicted = torch.sigmoid(outputs.data)
-
-            total += labels.size(0)
-            correct_count += (predicted == labels).sum().item()
-
-            loss = criterion(outputs, labels)
-            with amp.scale_loss(loss, optimizer) as scaled_loss:
-                scaled_loss.backward()
-            optimizer.step()
-
-        train_loss += loss.item()
-        train_tk.set_postfix(loss=train_loss / (step + 1), acc=correct_count / total)
-
-    if scheduler is not None:
-        records.lrs += scheduler.get_lr()
-        scheduler.step()
-    else:
-        records.lrs.append(max_lr)
-
-    records.train_losses_wo_dropout.append(train_loss_eval / (step + 1))
-    records.train_accs_wo_dropout.append(correct_count_eval / total)
-    records.train_losses.append(train_loss / (step + 1))
-    records.train_accs.append(correct_count / total)
-
-    print(f'Epoch {epoch}: train loss={records.train_losses[-1]:.4f} | train acc={records.train_accs[-1]:.4f}')
-    print(
-        f'Epoch {epoch}: eval_ loss={records.train_losses_wo_dropout[-1]:.4f} | train acc={records.train_accs_wo_dropout[-1]:.4f}')
-
-
-def validate(model, val_dl, criterion, records):
-    # val
-    model.eval()
-    val_loss = 0
-    correct_count = 0
-    total = 0
-
-    all_labels = []
-    all_predictions = []
-
-    for data in val_dl:
-        inputs, labels = get_input_with_label(data)
-
-        with torch.no_grad():
-            outputs = model(inputs)
-            predicted = torch.sigmoid(outputs.data)
-
-            total += labels.size(0)
-            # TODO: calc metrics
-            correct_count += (predicted == labels).sum().item()
-            val_loss += criterion(outputs, labels)
-
-        all_labels.append(labels.data.cpu().numpy())
-        all_predictions.append(predicted.data.cpu().numpy())
-
-    all_labels = np.concatenate(all_labels, axis=0)
-    all_predictions = np.concatenate(all_predictions, axis=0)
-    extra_score = extra_metric(all_labels, all_predictions)
-
-    records.val_losses.append(val_loss / len(val_dl))
-    records.val_accs.append(correct_count / total)
-    records.val_custom_metrics.append(extra_score)
-    print(f'\t val loss={records.val_losses[-1]:.4f} | val acc={records.val_accs[-1]:.4f} | '
-          f'val {extra_metric.__name__}={records.val_custom_metrics[-1]:.4f}')
-
-
-def train(train_dl, val_dl, test_dl, val_dl_iter, model, optimizer, n_epochs, max_lr, scheduler, criterion, val_rate):
-    records = Records()
-    best_metric = 1e9
-
-    os.makedirs('checkpoints', exist_ok=True)
-
-    for epoch in range(n_epochs):
-        train_one_epoch(epoch, model, train_dl, max_lr, optimizer, criterion, scheduler, records)
-        if epoch % val_rate == 0:
-            validate(model, val_dl, criterion, records)
-            # validate(model, test_dl, criterion, records)
-
-            selection_metric = getattr(records, "val_losses")[-1]
-
-            if selection_metric <= best_metric:
-                best_metric = selection_metric
-                print(
-                    f'>>> Saving best model metric={selection_metric:.4f} compared to previous best {best_metric:.4f}')
-                checkpoint = {'model': model,
-                              'optimizer': optimizer.state_dict()}
-
-                torch.save(checkpoint, 'checkpoints/best_model.pth')
-                if settings.USE_FOUNDATIONS:
-                    foundations.save_artifact('checkpoints/best_model.pth', key='best_model_checkpoint')
-
-            # Save eyeball plot to Atlas GUI
-            if settings.USE_FOUNDATIONS:
-                display_filename = f'{epoch}_display.png'
-                try:
-                    data = next(val_dl_iter)
-                except:
-                    val_dl_iter = iter(val_dl)
-                    data = next(val_dl_iter)
-                display_predictions_on_image(model, data, name=display_filename)
-                foundations.save_artifact(display_filename, key=f'{epoch}_display')
-
-            # Save metrics plot
-            visualize_metrics(records, extra_metric=extra_metric, name='metrics.png')
-
-            # Save metrics plot to Atlas GUI
-            if settings.USE_FOUNDATIONS:
-                foundations.save_artifact('metrics.png', key='metrics_plot')
-
-    # Log metrics to GUI
-    max_index = np.argmin(getattr(records, 'val_losses'))
-
-    useful_metrics = records.get_useful_metrics()
-    for metric in useful_metrics:
+        os.makedirs('checkpoints', exist_ok=True)
+        os.makedirs('tensorboard', exist_ok=True)
         if settings.USE_FOUNDATIONS:
-            foundations.log_metric(metric, float(getattr(records, metric)[max_index]))
+            foundations.set_tensorboard_logdir('tensorboard')
+        self.writer = SummaryWriter("tensorboard")
+        self.meter_train = Meter(self.writer, 0)
+        self.meter_val = Meter(self.writer, 0)
+        self.current_epoch = 0
+        self.best_metric = 1e9
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.phase = 'train'
+        self.train()
+
+    def eval(self):
+        self.phase = 'test'
+        self.model.eval()
+        self.meter_val = Meter(self.writer, self.phase, self.current_epoch)
+
+    def train(self):
+        self.phase = 'train'
+        self.model.train()
+        self.meter_train = Meter(self.writer, self.phase, self.current_epoch)
+
+    def forward(self, images, targets) -> (torch.Tensor, torch.Tensor):
+        images = images.to(self.device)
+        masks = targets.to(self.device)
+        if self.phase == 'train':
+            with torch.set_grad_enabled(True):
+                outputs = self.model(images)
+                loss = self.criterion(outputs, masks)
         else:
-            print(metric, float(getattr(records, metric)[max_index]))
+            with torch.no_grad():
+                outputs = self.model(images)
+                loss = self.criterion(outputs, masks)
+        return loss, outputs
+
+    def step(self):
+        self.train()
+        train_tk = tqdm(self.train_dl, total=int(len(self.train_dl)), desc='Train Epoch')
+
+        for inputs, labels, data in train_tk:
+            self.optimizer.zero_grad()
+            with torch.set_grad_enabled(True):
+                loss, outputs = self.forward(inputs, labels)
+                with amp.scale_loss(loss, self.optimizer) as scaled_loss:
+                    scaled_loss.backward()
+                self.optimizer.step()
+
+            self.meter_train.update(labels, outputs.detach().cpu(), loss.item())
+
+        if self.scheduler is not None:
+            self.writer.add_scalar("lr", np.mean(self.scheduler.get_lr()))
+            self.scheduler.step()
+        else:
+            self.writer.add_scalar("lr", self.lr)
+
+        dices, iou, loss = self.meter_train.log_metric()
+        print(f'Epoch {self.current_epoch}: train loss={loss:.4f} | train iou={iou:.4f}')
+
+
+    def validate(self):
+        self.eval()
+
+        for inputs, labels, data in self.val_dl:
+            loss, output = self.forward(inputs, labels)
+            output = output.detach().cpu()
+            self.meter_val.update(labels, output, loss.item())
+
+        dices, iou, loss = self.meter_val.log_metric()
+        selection_metric = loss
+
+        if selection_metric <= self.best_metric:
+            self.best_metric = selection_metric
+            print(f'>>> Saving best model metric={selection_metric:.4f}')
+            checkpoint = {'model': self.model, 'optimizer': self.optimizer.state_dict()}
+            torch.save(checkpoint, 'checkpoints/best_model.pth')
+            if settings.USE_FOUNDATIONS:
+                foundations.save_artifact('checkpoints/best_model.pth', key='best_model_checkpoint')
+
+                foundations.log_metric("train_loss", np.mean(self.meter_train.losses))
+                foundations.log_metric("val_loss", loss)
+                foundations.log_metric("val_dice", dices[0])
+                foundations.log_metric("val_iou", iou)
+
+        try:
+            inputs, labels, data = next(self.visual_iter)
+        except:
+            self.visual_iter = iter(self.val_dl)
+            inputs, labels, data = next(self.visual_iter)
+
+        loss, output = self.forward(inputs, labels)
+        self.writer.add_images(f'validate/{self.current_epoch}_inputs.png', self.unnorm(inputs), self.current_epoch)
+        self.writer.add_images(f'validate/{self.current_epoch}_mask.png', labels, self.current_epoch)
+        self.writer.add_images(f'validate/{self.current_epoch}_predict.png', output, self.current_epoch)
+        print(f'Epoch {self.current_epoch}: val loss={loss:.4f} | val iou={iou:.4f}')
+
+    def start(self):
+        self.current_epoch = 0
+        for epoch in range(self.num_epochs):
+            self.current_epoch = epoch
+            self.step()
+            self.validate()

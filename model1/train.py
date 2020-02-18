@@ -60,16 +60,16 @@ def train_one_epoch(epoch, model, train_dl, max_lr, optimizer, criterion, schedu
 
         model.train()
         optimizer.zero_grad()
-        with torch.set_grad_enabled(True):
-            outputs = model(inputs)
-            _, predicted = torch.max(outputs.data, 1)
 
-            total += labels.size(0)
-            correct_count += (predicted == labels).sum().item()
-            loss = criterion(outputs, labels)
-            with amp.scale_loss(loss, optimizer) as scaled_loss:
-                scaled_loss.backward()
-            optimizer.step()
+        outputs = model(inputs)
+        _, predicted = torch.max(outputs.data, 1)
+
+        total += labels.size(0)
+        correct_count += (predicted == labels).sum().item()
+        loss = criterion(outputs, labels)
+        with amp.scale_loss(loss, optimizer) as scaled_loss:
+            scaled_loss.backward()
+        optimizer.step()
 
         train_loss += loss.item()
         train_tk.set_postfix(loss=train_loss / (step + 1), acc=correct_count / total)

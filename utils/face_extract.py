@@ -1,4 +1,3 @@
-import os
 import cv2
 import numpy as np
 import torch
@@ -94,6 +93,10 @@ class FaceExtractor:
             for i in range(len(detections)):
                 # Crop the faces out of the original frame.
                 faces = self._add_margin_to_detections(detections[i], frame_size, margin=self.margin)
+
+                bboxes = faces[:, :4].cpu().numpy().astype(np.int)
+                bboxes = [np.array([xmin, ymin, xmax, ymax]) for ymin, xmin, ymax, xmax in bboxes]
+
                 faces = self._crop_faces(frames[v][i], faces)
 
                 # Add additional information about the frame and detections.
@@ -101,11 +104,11 @@ class FaceExtractor:
                 frame_dict = {"frame_w": frame_size[0],
                               "frame_h": frame_size[1],
                               "faces": faces,
-                              "scores": scores}
+                              "scores": scores,
+                              "boxes": bboxes}
                 result.append(frame_dict)
 
                 # TODO: could also add:
-                # - face rectangle in original frame coordinates
                 # - the keypoints (in crop coordinates)
 
         return result

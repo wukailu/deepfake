@@ -2,19 +2,19 @@ import numpy as np
 import cv2
 from PIL import Image
 from torch.utils.data import Dataset
-import dlib
 from facenet_pytorch import MTCNN
-from utils.read_video import VideoReader
-from utils.face_extract import FaceExtractor
-from pkgs.blazeface import BlazeFace
+import sys
+sys.path.append("pkgs")
+sys.path.append("utils")
+from read_video import VideoReader
+from face_extract import FaceExtractor
+from blazeface import BlazeFace
 import os
 import torch
 from torchvision.transforms import Normalize, RandomHorizontalFlip, ToTensor, Compose
 import matplotlib.pyplot as plt
-from skvideo.io import vread
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
 
 class Video_reader:
     @staticmethod
@@ -48,9 +48,15 @@ class Video_reader:
 
 
 class FullVideoReader:
+
     @staticmethod
     def extract_video(video_path):
-        return vread(video_path)
+        from skvideo.io import vread
+        try:
+            ret = vread(video_path)
+        except:
+            ret = np.array([])
+        return ret
 
     def extract_one_frame(self, video_path, frame_index):
         return self.extract_video(video_path)[frame_index]
@@ -67,6 +73,8 @@ class VideoDataset(Dataset):
 
     def __getitem__(self, idx: int):
         frames = self.video_reader.extract_video(self.paths[idx])
+        if len(frames) == 0:
+            return np.array([])
         samples = np.linspace(0, len(frames) - 1, self.sample_rate).round().astype(int)
         return frames[samples]
 
@@ -91,8 +99,9 @@ class FastDataset(Dataset):
 class Cache_loader:
     @staticmethod
     def extract_video(video_path):
+        from settings import face_cache_path
         filename = video_path.split('/')[-1].split('.')[0]
-        cache_path = '/data/deepfake/faces/' + filename
+        cache_path = os.path.join(face_cache_path, filename)
         if os.path.exists(cache_path):
             ret = {}
             for root, subdirs, files in os.walk(cache_path):
@@ -153,12 +162,13 @@ class Face_extractor:
 
     def get_faces(self, images, with_person_num=False, only_one=True, with_bbox=False):
         faces, nums, bboxes = self._get(images)
+        assert len(faces) == len(nums) == len(bboxes)
         if only_one:
-            faces = [face[0] for face in faces if len(face) > 0]
-            nums = [num for num, face in zip(nums, faces) if len(face) > 0]
-            bboxes = [box[0] for box, face in zip(bboxes, faces) if len(face) > 0]
+            ret_faces = [face[0] for face in faces if len(face) > 0]
+            ret_nums = [num for num, face in zip(nums, faces) if len(face) > 0]
+            ret_bboxes = [box[0] for box, face in zip(bboxes, faces) if len(face) > 0]
 
-        return self._choice([faces, nums, bboxes], [True, with_person_num, with_bbox])
+        return self._choice([ret_faces, ret_nums, ret_bboxes], [True, with_person_num, with_bbox])
 
     def get_face(self, image, with_person_num=False, only_one=True, with_bbox=False):
         faces, nums, bboxes = self.get_faces(np.array([image]), with_person_num=True, only_one=False, with_bbox=True)
@@ -214,6 +224,7 @@ class MTCNN_extractor(Face_extractor):
 
 class Dlib_extractor(Face_extractor):
     def __init__(self):
+        import dlib
         super().__init__()
         self.extractor = dlib.get_frontal_face_detector()
 
@@ -234,19 +245,22 @@ class Dlib_extractor(Face_extractor):
 
 
 class BlazeFace_extractor(Face_extractor):
-    def __init__(self, blaze_weight, anchors):
+    def __init__(self, blaze_weight, anchors, scale:float=1.0):
         super().__init__()
         face_detector = BlazeFace().to(device)
         face_detector.load_weights(blaze_weight)
         face_detector.load_anchors(anchors)
         _ = face_detector.train(False)
-        self.extractor = FaceExtractor(face_detector)
+        self.extractor = FaceExtractor(face_detector, margin=scale-1)
 
     def _get(self, images):
         ret = self.extractor.process_video(images)
         person_nums = [np.sum(np.array(dic['scores']) > 0.8) for dic in ret]
         faces = [dic["faces"] for dic in ret]
-        return faces, person_nums
+        box = [dic["boxes"] for dic in ret]
+        for dic in ret:
+            assert len(dic["boxes"]) == len(dic["faces"])
+        return faces, person_nums, box
 
 
 class Inference_model:

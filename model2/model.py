@@ -40,10 +40,12 @@ def get_classifier(in_features, use_hidden_layer, dropout):
         )
 
 
-def create_model(use_hidden_layer, dropout, backbone, params):
-    # TODO: fill the model
+def create_model(params):
+    backbone = params['backbone']
     if backbone == 1:
-        model = torch.hub.load('pytorch/vision:v0.5.0', 'deeplabv3_resnet101', pretrained=True)
+        model = models.detection.maskrcnn_resnet50_fpn(pretrained=True, num_classes=1)
+    # elif backbone == 2:
+    #     model = torch.hub.load('pytorch/vision:v0.5.0', 'deeplabv3_resnet101', pretrained=True)
     else:
         raise Exception("Unrecognized model name, using resnet18")
 

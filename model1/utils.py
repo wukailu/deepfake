@@ -37,6 +37,7 @@ def visualize_metrics(records, extra_metric, name):
     _ = axes[3].set_title('lr')
     plt.tight_layout()
     plt.savefig(name, format='png')
+    plt.close(fig)
 
 
 def display_predictions_on_image(model, data, name):

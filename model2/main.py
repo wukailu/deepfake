@@ -7,14 +7,16 @@ from apex import amp
 import random
 
 import sys
+
 sys.path.append('/job/job_source/')
 import settings
 from model2.data_loader import create_dataloaders
 from model2.model import get_trainable_params, create_model, print_model_params
-from model2.train import train
+from model2.train import Trainer
 
 if settings.USE_FOUNDATIONS:
     import foundations
+
     params = foundations.load_parameters()
     # Fix random seed
     torch.manual_seed(params['seed'])
@@ -26,6 +28,7 @@ else:
     np.random.seed(seed)
     random.seed(seed)
     import hparams_search
+
     params = hparams_search.generate_params()
     params['seed'] = seed
     print(params)
@@ -41,7 +44,7 @@ criterion = nn.BCEWithLogitsLoss()
 
 print('Creating model')
 # Create model, freeze layers and change last layer
-model, params = create_model(bool(params['use_hidden_layer']), params['dropout'], params['backbone'], params)
+model, params = create_model(params)
 _ = print_model_params(model)
 params_to_update = get_trainable_params(model)
 
@@ -58,8 +61,11 @@ else:
 
 print('Creating datasets')
 # Get dataloaders
-train_dl, val_dl, test_dl, val_dl_iter = create_dataloaders(params)
+train_dl, val_dl, test_dl = create_dataloaders(params)
 
 print('Training start..')
-train(train_dl, val_dl, test_dl, val_dl_iter, model, optimizer, params['n_epochs'], params['max_lr'], scheduler,
-      criterion, params['val_rate'])
+
+trainer = Trainer(train_dl, val_dl, test_dl, model, optimizer, params['n_epochs'], params['max_lr'], scheduler,
+                  criterion)
+
+trainer.start()

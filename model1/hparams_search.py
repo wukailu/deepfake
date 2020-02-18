@@ -6,20 +6,26 @@ NUM_JOBS = 50
 
 
 def generate_params():
-    params = {'batch_size': int(np.random.choice([64])),
-              'n_epochs': int(np.random.choice([10])),
+    params = {'batch_size': int(np.random.choice([128])),
+              'n_epochs': int(np.random.choice([40])),
               'weight_decay': float(np.random.choice([0.00001])),  # 0, 0.00001, 0.0001
-              'dropout': float(np.random.choice([0.5])),  # 0.3 0.5 0.7 0.9
+              'dropout': float(np.random.choice([0, 0.5])),  # 0.3 [0.5] 0.7 0.9
               
+              # 'RandomAffine': int(np.random.choice([1])),
+              # 'ColorJitter': int(np.random.choice([1])),
+              # 'RandomPerspective': int(np.random.choice([0])),
+              # 'RandomErasing': int(np.random.choice([2])),
+              # 'RandomCrop': int(np.random.choice([0])),
+
               'RandomAffine': int(np.random.choice([1])),
-              'ColorJitter': int(np.random.choice([1])),
+              'ColorJitter': int(np.random.choice([0])),
               'RandomPerspective': int(np.random.choice([0])),
               'RandomErasing': int(np.random.choice([2])),
               'RandomCrop': int(np.random.choice([0])),
 
-              'max_lr': float(np.random.choice([0.0003])),  # 0.0003, 0.0001, 0.00003
-              'use_lr_scheduler': int(np.random.choice([0])),  # 0, 1
-              'scheduler_gamma': float(np.random.choice([0.96])),  # 0.96, 0.95, 0.94
+              'max_lr': float(np.random.choice([0.01, 0.003, 0.001, 0.0003, 0.0001])),  # 0.0003, [0.0001], 0.00003
+              'use_lr_scheduler': int(np.random.choice([0, 1, 2])),  # 0, 1
+              'scheduler_gamma': float(np.random.choice([0.96, 0.9, 0.8])),  # 0.96, 0.95, 0.94
               'use_hidden_layer': int(np.random.choice([0])),  # 0, 1
               'backbone': int(np.random.choice([7])),  # 1, 2, 3, 4, 5, 6, 7, 8
               'same_transform': int(np.random.choice([1])),

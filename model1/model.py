@@ -25,6 +25,14 @@ def get_trainable_params(model):
     return params_to_update
 
 
+def freeze_until(net, param_name):
+    found_name = False
+    for name, params in net.named_parameters():
+        if name == param_name:
+            found_name = True
+        params.requires_grad = found_name
+
+
 def get_classifier(in_features, use_hidden_layer, dropout):
     if use_hidden_layer:
         return  nn.Sequential(
@@ -80,6 +88,8 @@ def create_model(use_hidden_layer, dropout, backbone, params):
         model = models.resnet18(pretrained=True)
         model.fc = get_classifier(model.fc.in_features, use_hidden_layer, dropout)
 
+    # TODO: add this to hyper-parameter search
+    freeze_until(model, "_blocks.4._expand_conv.weight")
     print(model)
     model = model.cuda()
     return model, params

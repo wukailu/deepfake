@@ -13,6 +13,8 @@ from model1.data_loader import create_dataloaders
 from model1.model import get_trainable_params, create_model, print_model_params
 from model1.train import train
 
+# import pdb
+
 if settings.USE_FOUNDATIONS:
     import foundations
     params = foundations.load_parameters()
@@ -40,7 +42,6 @@ torch.backends.cudnn.benchmark = False
 print('Creating loss function')
 # Loss function
 criterion = nn.CrossEntropyLoss()
-# criterion = nn.MSELoss()
 
 print('Creating model')
 # Create model, freeze layers and change last layer
@@ -54,15 +55,18 @@ optimizer = optim.Adam(params_to_update, lr=params['max_lr'], weight_decay=param
 model, optimizer = amp.initialize(model, optimizer, opt_level='O1', verbosity=0)
 
 # Learning rate scheme
-if bool(params['use_lr_scheduler']):
-    scheduler = lr_scheduler.ExponentialLR(optimizer, gamma=params['scheduler_gamma'])
-else:
+if params['use_lr_scheduler'] == 0:
     scheduler = None
+elif params['use_lr_scheduler'] == 1:
+    scheduler = lr_scheduler.ExponentialLR(optimizer, gamma=params['scheduler_gamma'])
+elif params['use_lr_scheduler'] == 2:
+    scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
+
 
 print('Creating datasets')
 # Get dataloaders
 train_dl, val_dl, test_dl, val_dl_iter = create_dataloaders(params)
-# train_dl, val_base_dl, val_augment_dl, display_dl_iter = create_dataloaders(params)
+# pdb.set_trace()
 
 if settings.USE_FOUNDATIONS:
     foundations.log_params(params)

@@ -1,93 +1,39 @@
 import torch
+from torch import Tensor
 import numpy as np
 
 import matplotlib
-import matplotlib.pyplot as plt
+from torch.utils.tensorboard import SummaryWriter
+
 matplotlib.use('Agg')
 
-def visualize_metrics(records, extra_metric, name):
-    fig, axes = plt.subplots(nrows=1, ncols=4, figsize=(15, 6))
-    axes[0].plot(list(range(len(records.train_losses))), records.train_losses, label='train')
-    axes[0].plot(list(range(len(records.train_losses_wo_dropout))), records.train_losses_wo_dropout,
-                 label='train w/o dropout')
-    axes[0].plot(list(range(len(records.val_losses))), records.val_losses, label='val')
-    axes[0].set_title('loss')
-    axes[0].legend()
 
-    axes[1].plot(list(range(len(records.train_accs))), records.train_accs, label='train')
-    axes[1].plot(list(range(len(records.train_accs_wo_dropout))), records.train_accs_wo_dropout,
-                 label='train w/o dropout')
-    axes[1].plot(list(range(len(records.val_accs))), records.val_accs, label='val')
-    axes[1].axhline(y=0.5, color='g', ls='--')
-    axes[1].axhline(y=0.667, color='r', ls='--')
-    axes[1].set_title('acc')
-    axes[1].legend()
+class Unnormalize:
+    """Converts an image tensor that was previously Normalize'd
+    back to an image with pixels in the range [0, 1]."""
+    def __init__(self, mean, std):
+        self.mean = mean
+        self.std = std
 
-    axes[2].plot(list(range(len(records.train_custom_metrics))), records.train_custom_metrics, label='train')
-    axes[2].plot(list(range(len(records.train_custom_metrics_wo_dropout))), records.train_custom_metrics_wo_dropout,
-                 label='train w/o dropout')
-    axes[2].plot(list(range(len(records.val_custom_metrics))), records.val_custom_metrics, label='val')
-    axes[2].axhline(y=0.5, color='g', ls='--')
-    axes[2].axhline(y=0.5, color='r', ls='--')
-    axes[2].set_title(f'{extra_metric.__name__}')
-    axes[2].legend()
-
-    axes[3].plot(list(range(len(records.lrs))), records.lrs)
-    _ = axes[3].set_title('lr')
-    plt.tight_layout()
-    plt.savefig(name, format='png')
-
-
-def display_predictions_on_image(model, data, name):
-    # val
-    model.eval()
-
-    inputs, labels = get_input_with_label(data)
-    img_files = data['real_file'] + data['fake_file']
-
-    with torch.no_grad():
-        outputs = model(inputs)
-        predicted = torch.sigmoid(outputs.data)
-        # TODO: calc probability
-        outputs_predicbilty = torch.sigmoid(outputs.data)
-    numbers = min(labels.size(0), 100)
-    nrows = int(numbers ** 0.5)
-    ncols = int(np.ceil(numbers / nrows))
-
-    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(30, 40))
-    step = 0
-    for i in range(nrows):
-        for j in range(ncols):
-            face_crop = np.load(img_files[step])
-            axes[i, j].set_title(
-                f'{outputs_predicbilty[step][0]:.2f},{outputs_predicbilty[step][1]:.2f}|{predicted[step]}|{labels[step]}')
-            axes[i, j].imshow(face_crop)
-            step += 1
-            if step == numbers:
-                break
-    plt.title('predicted probability real, fake | prediction | label (0: real 1: fake)')
-    plt.tight_layout()
-    plt.savefig(name, format='png')
-    plt.close(fig)
-
-
-def get_input_with_label(data: dict):
-    # TODO: change this
-    batch_size = data['real'].shape[0]
-    inputs = torch.cat((data['real'], data['fake'])).cuda()
-    labels = torch.cat((torch.zeros(batch_size), torch.ones(batch_size))).long().cuda()
-    return inputs, labels
+    def __call__(self, tensor):
+        mean = torch.as_tensor(self.mean, dtype=tensor.dtype, device=tensor.device).view(3, 1, 1)
+        std = torch.as_tensor(self.std, dtype=tensor.dtype, device=tensor.device).view(3, 1, 1)
+        return torch.clamp(tensor*std + mean, 0., 1.)
 
 
 class Meter:
     """A meter to keep track of iou and dice scores throughout an epoch"""
 
-    def __init__(self, phase, epoch):
+    def __init__(self, writer: SummaryWriter, phase: str, epoch: int):
         self.base_threshold = 0.5  # <<<<<<<<<<< here's the threshold
         self.base_dice_scores = []
         self.dice_neg_scores = []
         self.dice_pos_scores = []
         self.iou_scores = []
+        self.losses = []
+        self.writer = writer
+        self.epoch = epoch
+        self.phase = phase
 
     @staticmethod
     def _predict(X, threshold):
@@ -97,7 +43,7 @@ class Meter:
         return preds
 
     @staticmethod
-    def _metric(probability, truth, threshold=0.5):
+    def _metric(probability: Tensor, truth: Tensor, threshold=0.5):
         """Calculates dice of positive and negative images seperately"""
         '''probability and truth must be torch tensors'''
         batch_size = len(truth)
@@ -126,7 +72,7 @@ class Meter:
 
         return dice, dice_neg, dice_pos, num_neg, num_pos
 
-    def _compute_iou_batch(self, outputs, labels, classes=None):
+    def _compute_iou_batch(self, outputs: Tensor, labels: Tensor, classes=None):
         """computes mean iou for a batch of ground truth masks and predicted masks"""
         ious = []
         preds = np.copy(outputs)  # copy is imp
@@ -153,9 +99,11 @@ class Meter:
                 ious.append(intersection / union)
         return ious if ious else [1]
 
-    def update(self, targets, outputs):
+    def update(self, targets: Tensor, outputs: Tensor, loss: float):
         probs = torch.sigmoid(outputs)
         dice, dice_neg, dice_pos, _, _ = self._metric(probs, targets, self.base_threshold)
+
+        self.losses.append(loss)
         self.base_dice_scores.extend(dice.tolist())
         self.dice_pos_scores.extend(dice_pos.tolist())
         self.dice_neg_scores.extend(dice_neg.tolist())
@@ -163,10 +111,18 @@ class Meter:
         iou = self._compute_iou_batch(preds, targets, classes=[1])
         self.iou_scores.append(iou)
 
-    def get_metrics(self):
+    def log_metric(self):
         dice = np.nanmean(self.base_dice_scores)
         dice_neg = np.nanmean(self.dice_neg_scores)
         dice_pos = np.nanmean(self.dice_pos_scores)
         dices = [dice, dice_neg, dice_pos]
         iou = np.nanmean(self.iou_scores)
-        return dices, iou
+        loss = np.nanmean(self.losses)
+
+        self.writer.add_scalar(self.phase + "/dice", dice, self.epoch)
+        self.writer.add_scalar(self.phase + "/dice_pos", dice_neg, self.epoch)
+        self.writer.add_scalar(self.phase + "/dice", dice_pos, self.epoch)
+        self.writer.add_scalar(self.phase + "/iou", iou, self.epoch)
+        self.writer.add_scalar(self.phase + "/loss", loss, self.epoch)
+
+        return dices, iou, loss

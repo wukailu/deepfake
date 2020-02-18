@@ -3,17 +3,36 @@ import numpy as np
 import pandas as pd
 from pandas import DataFrame
 
-import cv2
+import cv2, os
 import torch
 from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
 from torch.utils.data import DataLoader
 import random
+from torch import Tensor
+
+training_mean, training_std = [0.465, 0.428, 0.415], [0.269, 0.275, 0.2755]
+
+
+def blur(ret: Tensor):
+    return (ret*9 + ret.roll(1, 1)*4 + ret.roll(-1, 1)*4 + ret.roll(1, 2)*4 + ret.roll(-1, 2)*4) / 25
+
+
+def gen_mask(f1: Tensor, f2: Tensor, threhold=0.125):  # for batch
+    assert f1.shape == f2.shape and len(f1.shape) == 4
+    ret, _ = (f1 - f2).abs().max(dim=1)
+
+    ret = blur(ret)
+    ret = blur(ret)
+    ret = blur(ret)
+
+    ret[ret < threhold] = 0
+    ret[ret > 0] = 1
+    return ret.long()
 
 
 def collate_fn(batch: list):
-    # TODO: change this for segmentation
     ret = {}
     for key in batch[0].keys():
         ret[key] = [item[key] for item in batch if item[key] is not None]
@@ -21,10 +40,13 @@ def collate_fn(batch: list):
         ret['real'] = torch.stack(ret['real'])
         ret['fake'] = torch.stack(ret['fake'])
     except:
-        print("len(real) == 0")
+        print(">>>>>>>>>>>>>>>>>>len(real) == 0<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<")
         ret['real'] = torch.zeros((1, 3, 224, 224))
         ret['fake'] = torch.zeros((1, 3, 224, 224))
-    return ret
+
+    inputs = ret['fake']
+    labels = gen_mask(ret['real'], ret['fake'])
+    return inputs, labels, ret
 
 
 class DFDCDataset(Dataset):
@@ -49,23 +71,27 @@ class DFDCDataset(Dataset):
 
     def __get_transformed_face(self, filename: str, frame: int) -> (torch.Tensor, pathlib.Path):
         cached_dir = self.cached_path / filename.split('.')[0]
-        cached_file = cached_dir / (str(frame) + '.jpg')
+        cached_file = cached_dir / (str(frame) + '.png')
 
         if cached_file.is_file():
-            img = cv2.imread(cached_file)
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            with open(cached_file, "rb") as fp:
+                pil_img = Image.open(fp)
+                pil_img.load()
         else:
             raise IOError("cache not found")
-
-        image = self.transform(Image.fromarray(img))
+        if pil_img.size != (960, 540):
+            raise IOError("shape not match")
+        image = self.transform(pil_img)
         return image, cached_file
 
     def __getitem__(self, idx: int):
         real_fn = self.real_filename[idx]
         fake_fn = np.random.choice(self.real2fakes[real_fn])
 
+        _, _, files = os.walk(self.cached_path / real_fn.split(".")[0])
+        frames = [int(file.split(".")[0]) for file in files]
         try:
-            frame = np.random.choice(list(range(0, 300, 13)))
+            frame = np.random.choice(frames)
 
             temp_seed = np.random.randint(0, 2e9)
             if self.same_transform:
@@ -81,8 +107,6 @@ class DFDCDataset(Dataset):
 
 
 def get_transforms(params, image_size=224):
-    # TODO: recalc mean and std
-    pre_trained_mean, pre_trained_std = [0.439, 0.328, 0.304], [0.232, 0.206, 0.201]
     tensor_transform = []
 
     train_transforms = [transforms.RandomHorizontalFlip()]
@@ -114,14 +138,14 @@ def get_transforms(params, image_size=224):
         train_transforms,
         transforms.Resize(image_size),
         transforms.ToTensor(),
-        transforms.Normalize(mean=pre_trained_mean, std=pre_trained_std),
+        transforms.Normalize(training_mean, training_std),
         tensor_transform,
     ])
 
     val_transforms = transforms.Compose([
         transforms.Resize(image_size),
         transforms.ToTensor(),
-        transforms.Normalize(mean=pre_trained_mean, std=pre_trained_std)
+        transforms.Normalize(training_mean, training_std)
     ])
     return train_transforms, val_transforms
 
@@ -129,7 +153,7 @@ def get_transforms(params, image_size=224):
 def create_dataloaders(params: dict):
     train_transforms, val_transforms = get_transforms(params, image_size=224)
     metadata = pd.read_json(params['metadata_path']).T
-    loader = 64
+    loader = 8
     train_dl = _create_dataloader(metadata[metadata['split_kailu'] == 'train'], params, train_transforms,
                                   shuffle=True, num_workers=loader)
     val_dl = _create_dataloader(metadata[metadata['split_kailu'] == 'validation'], params, val_transforms,
@@ -137,7 +161,7 @@ def create_dataloaders(params: dict):
     test_dl = _create_dataloader(metadata[metadata['split_kailu'] == 'test'], params, val_transforms,
                                  shuffle=False, num_workers=loader)
 
-    return train_dl, val_dl, test_dl, iter(val_dl)
+    return train_dl, val_dl, test_dl
 
 
 def _create_dataloader(metadata: DataFrame, params: dict, transform, num_workers=4, shuffle=True):
