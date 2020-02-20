@@ -78,5 +78,6 @@ def display_predictions_on_image(model, data, name):
 def get_input_with_label(data: dict):
     batch_size = data['real'].shape[0]
     inputs = torch.cat((data['real'], data['fake'])).cuda()
-    labels = torch.cat((torch.zeros(batch_size), torch.ones(batch_size))).long().cuda()
+    labels = torch.cat((torch.zeros(batch_size), torch.ones(batch_size))).unsqueeze(dim=1).cuda()
     return inputs, labels
+

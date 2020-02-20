@@ -41,7 +41,7 @@ torch.backends.cudnn.benchmark = False
 
 print('Creating loss function')
 # Loss function
-criterion = nn.CrossEntropyLoss()
+criterion = nn.BCEWithLogitsLoss()
 
 print('Creating model')
 # Create model, freeze layers and change last layer

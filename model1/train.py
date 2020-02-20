@@ -47,26 +47,16 @@ def train_one_epoch(epoch, model, train_dl, max_lr, optimizer, criterion, schedu
     for step, data in enumerate(train_tk):
         inputs, labels = get_input_with_label(data)
 
-        if record_eval:
-            # eval with dropout turned off
-            model.eval()
-            with torch.no_grad():
-                outputs_eval = model(inputs)
-                _, predicted_eval = torch.max(outputs_eval.data, 1)
-                correct_count_eval += (predicted_eval == labels).sum().item()
-                loss_eval = criterion(outputs_eval, labels)
-
-            train_loss_eval += loss_eval.item()
-
         model.train()
         optimizer.zero_grad()
 
         outputs = model(inputs)
-        _, predicted = torch.max(outputs.data, 1)
+        predicted = torch.sigmoid(outputs.data) > 0.5
 
         total += labels.size(0)
         correct_count += (predicted == labels).sum().item()
         loss = criterion(outputs, labels)
+
         with amp.scale_loss(loss, optimizer) as scaled_loss:
             scaled_loss.backward()
         optimizer.step()
@@ -105,7 +95,7 @@ def validate(model, val_dl, criterion, records):
 
         with torch.no_grad():
             outputs = model(inputs)
-            _, predicted = torch.max(outputs.data, 1)
+            predicted = torch.sigmoid(outputs.data) > 0.5
 
             total += labels.size(0)
             correct_count += (predicted == labels).sum().item()

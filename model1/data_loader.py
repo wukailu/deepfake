@@ -93,7 +93,7 @@ class DFDCDataset(Dataset):
 
 
 def get_transforms(params, image_size=224):
-    pre_trained_mean, pre_trained_std = [0.439, 0.328, 0.304], [0.232, 0.206, 0.201]
+    pre_trained_mean, pre_trained_std = [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
     tensor_transform = []
 
     train_transforms = [transforms.RandomHorizontalFlip()]
