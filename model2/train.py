@@ -35,8 +35,8 @@ class Trainer(object):
         if settings.USE_FOUNDATIONS:
             foundations.set_tensorboard_logdir('tensorboard')
         self.writer = SummaryWriter("tensorboard")
-        self.meter_train = Meter(self.writer, 0)
-        self.meter_val = Meter(self.writer, 0)
+        self.meter_train = Meter(self.writer, 'train',0)
+        self.meter_val = Meter(self.writer, 'val',0)
         self.current_epoch = 0
         self.best_metric = 1e9
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -56,6 +56,7 @@ class Trainer(object):
     def forward(self, images, targets) -> (torch.Tensor, torch.Tensor):
         images = images.to(self.device)
         masks = targets.to(self.device)
+
         if self.phase == 'train':
             with torch.set_grad_enabled(True):
                 outputs = self.model(images)

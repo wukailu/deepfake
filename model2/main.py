@@ -5,7 +5,6 @@ import torch.optim as optim
 from torch.optim import lr_scheduler
 from apex import amp
 import random
-
 import sys
 
 sys.path.append('/job/job_source/')
@@ -27,7 +26,7 @@ else:
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
-    import hparams_search
+    import model2.hparams_search as hparams_search
 
     params = hparams_search.generate_params()
     params['seed'] = seed

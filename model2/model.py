@@ -1,3 +1,4 @@
+import segmentation_models_pytorch as smp
 import torchvision.models as models
 import torch.nn as nn
 import torch
@@ -20,30 +21,11 @@ def get_trainable_params(model):
     return params_to_update
 
 
-def get_classifier(in_features, use_hidden_layer, dropout):
-    if use_hidden_layer:
-        return  nn.Sequential(
-            nn.Dropout(dropout),
-            nn.Linear(in_features, in_features // 2),
-            nn.ReLU(),
-            nn.BatchNorm1d(in_features // 2),
-            nn.Dropout(dropout),
-            nn.Linear(in_features // 2, 2),
-            nn.Softmax(dim=1)
-        )
-
-    else:
-        return nn.Sequential(
-            nn.Dropout(dropout),
-            nn.Linear(in_features, 2),
-            nn.Softmax(dim=1)
-        )
-
-
 def create_model(params):
     backbone = params['backbone']
     if backbone == 1:
-        model = models.detection.maskrcnn_resnet50_fpn(pretrained=True, num_classes=1)
+        model: nn.Module = smp.Unet(encoder_name="resnet34", classes=1)
+        # model = models.segmentation.fcn_resnet50(pretrained=True, num_classes=1)
     # elif backbone == 2:
     #     model = torch.hub.load('pytorch/vision:v0.5.0', 'deeplabv3_resnet101', pretrained=True)
     else:

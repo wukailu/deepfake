@@ -6,7 +6,7 @@ NUM_JOBS = 100
 
 
 def generate_params():
-    params = {'batch_size': int(np.random.choice([64])),
+    params = {'batch_size': int(np.random.choice([24])),
               'n_epochs': int(np.random.choice([20])),
               'weight_decay': float(np.random.choice([0.00001])),  # 0, 0.00001, 0.0001
               'max_lr': float(np.random.choice([0.0003])),  # 0.0003, 0.0001, 0.00003
@@ -15,16 +15,16 @@ def generate_params():
 
               'dropout': float(np.random.choice([0.5])),  # 0.3 0.5 0.7 0.9
               'use_hidden_layer': int(np.random.choice([0])),  # 0, 1
-              'backbone': int(np.random.choice([7])),  # 1, 2, 3, 4, 5, 6, 7, 8
+              'backbone': int(np.random.choice([1])),  # 1, 2, 3, 4, 5, 6, 7, 8
 
-              'same_transform': int(np.random.choice([0, 1])),
-              'RandomAffine': int(np.random.choice([0, 1, 2])),
-              'ColorJitter': int(np.random.choice([0, 1, 2])),
-              'RandomPerspective': int(np.random.choice([0, 1, 2])),
-              'RandomErasing': int(np.random.choice([0, 1, 2])),
+              'same_transform': int(np.random.choice([1])),
+              'RandomAffine': int(np.random.choice([0])),
+              'ColorJitter': int(np.random.choice([0])),
+              'RandomPerspective': int(np.random.choice([0])),
+              'RandomErasing': int(np.random.choice([0])),
 
               'data_path': settings.DATA_DIR,
-              'metadata_path': int(np.random.choice([2])),  # 0, 1, 2
+              'metadata_path': int(np.random.choice(list(range(len(settings.meta_data_path))))),
               'cache_path': settings.img_cache_path,
               }
 

@@ -55,6 +55,7 @@ class FullVideoReader:
         try:
             ret = vread(video_path)
         except:
+            print("reading failed on ", video_path)
             ret = np.array([])
         return ret
 
