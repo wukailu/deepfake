@@ -2,11 +2,13 @@ import glob
 
 BASE = "/data/deepfake/"
 DATA_DIR = "/data1/data/deepfake/dfdc_train"
-# meta_data_path_460 = [DATA_DIR + "/metadata_kailu_460.json", BASE + "metadata/metadata_seq.json"]
-meta_data_path = [BASE + "metadata/metadata_advanced.json"] #  glob.glob(BASE+"metadata/metadata_*.json")
+meta_data_path = [BASE + "metadata/metadata_40_49_dropped.json"]
+# meta_data_path = [BASE + "metadata/metadata_half_dropped.json"]
+# meta_data_path = [BASE + "metadata/metadata_075.json"]
+# meta_data_path = glob.glob(BASE+"metadata/metadata_*.json")
 bbox_path = BASE + "bbox_real.csv"
 face_cache_path = BASE + "faces/"
 img_cache_path = BASE + "shots/"
-USE_FOUNDATIONS = False
+USE_FOUNDATIONS = True
 un_normal_list = []
 test_model_path = '~/deepfake/model1/result/checkpoints/best_model.pth'

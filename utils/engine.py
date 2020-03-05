@@ -4,6 +4,7 @@ from PIL import Image
 from torch.utils.data import Dataset
 from facenet_pytorch import MTCNN
 import sys
+
 sys.path.append("pkgs")
 sys.path.append("utils")
 from read_video import VideoReader
@@ -13,8 +14,10 @@ import os
 import torch
 from torchvision.transforms import Normalize, RandomHorizontalFlip, ToTensor, Compose
 import matplotlib.pyplot as plt
+from collections import namedtuple
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
 
 class Video_reader:
     @staticmethod
@@ -54,8 +57,8 @@ class FullVideoReader:
         from skvideo.io import vread
         try:
             ret = vread(video_path)
-        except:
-            print("reading failed on ", video_path)
+        except Exception as e:
+            print("reading failed on ", video_path, e)
             ret = np.array([])
         return ret
 
@@ -98,6 +101,18 @@ class FastDataset(Dataset):
 
 
 class Cache_loader:
+    def __init__(self, video_paths):
+        self.paths = video_paths
+
+    def __len__(self):
+        return len(self.paths)
+
+    def __getitem__(self, idx: int):
+        ret = self.extract_video(self.paths[idx])
+        if len(ret) == 0:
+            return []
+        return list(ret.values())
+
     @staticmethod
     def extract_video(video_path):
         from settings import face_cache_path
@@ -107,16 +122,22 @@ class Cache_loader:
             ret = {}
             for root, subdirs, files in os.walk(cache_path):
                 for file in files:
-                    face = cv2.cvtColor(np.load(os.path.join(root, file)), cv2.COLOR_BGR2RGB)
-                    ret[int(file.split(".")[0])] = cv2.resize(face, 224)
+                    with open(os.path.join(root, file), 'rb') as f:
+                        face = Image.open(f)
+                        face.load()
+                    ret[int(file.split(".")[0])] = np.array(face)
             return ret
         else:
-            raise Exception("cache not found")
+            print("cache not found")
+            return {}
 
     @staticmethod
     def get_faces(cache_path):
         faces = [cv2.cvtColor(np.load(fn), cv2.COLOR_BGR2RGB) for fn in cache_path]
         return faces
+
+
+FaceInfo = namedtuple("FaceInfo", ['face', 'box', 'prob'])
 
 
 class Face_extractor:
@@ -149,80 +170,77 @@ class Face_extractor:
         return image[t:b, l:r]
 
     def _get(self, images):
-        return [], [], []
+        return []
 
-    @staticmethod
-    def _choice(objs, options):
-        ret = []
-        for obj, opt in zip(objs, options):
-            if opt:
-                ret.append(obj)
-        if len(ret) == 1:
-            return ret[0]
-        return ret
-
-    def get_faces(self, images, with_person_num=False, only_one=True, with_bbox=False):
-        faces, nums, bboxes = self._get(images)
-        assert len(faces) == len(nums) == len(bboxes)
+    def get_faces(self, images, only_one=True):
+        faceInfoList = self._get(images)
         if only_one:
-            ret_faces = [face[0] for face in faces if len(face) > 0]
-            ret_nums = [num for num, face in zip(nums, faces) if len(face) > 0]
-            ret_bboxes = [box[0] for box, face in zip(bboxes, faces) if len(face) > 0]
+            faceInfoList = [multiFace[0] for multiFace in faceInfoList if len(multiFace) > 0]
+        return faceInfoList
 
-        return self._choice([ret_faces, ret_nums, ret_bboxes], [True, with_person_num, with_bbox])
-
-    def get_face(self, image, with_person_num=False, only_one=True, with_bbox=False):
-        faces, nums, bboxes = self.get_faces(np.array([image]), with_person_num=True, only_one=False, with_bbox=True)
-        faces, nums = faces[0], nums[0]
+    def get_face(self, image, only_one=True):
+        faceInfo = self.get_faces(np.array([image]), only_one=False)[0]
         if only_one:
-            if len(faces) > 0:
-                faces = faces[0]
-                bboxes = bboxes[0]
+            if len(faceInfo) > 0:
+                faceInfo = faceInfo[0]
             else:
-                faces = None
-                bboxes = None
-        return self._choice([faces, nums, bboxes], [True, with_person_num, with_bbox])
+                faceInfo = None
+        return faceInfo
 
 
 class MTCNN_extractor(Face_extractor):
-    def __init__(self, down_sample=2, batch_size=5, my_device=device, keep_empty=False):
+    def __init__(self, down_sample=2, batch_size=30, my_device=device, keep_empty=False, factor=0.709, size_range=None, prob_limit=None):
         super().__init__()
-        self.extractor = MTCNN(keep_all=True, device=my_device, min_face_size=80 // down_sample, ).eval()
+        self.prob_limit = prob_limit
+        self.size_range = size_range
+        self.extractor = MTCNN(keep_all=True, device=my_device, min_face_size=80 // down_sample, factor=factor).eval()
         self.down_sample = down_sample
         self.batch_size = batch_size
         self.keep_empty = keep_empty
 
     def _get(self, images):
-        face_list = []
-        person_nums = []
-        bboxes = []
+        ret = []
         for start in range(0, len(images), self.batch_size):
-            ret_face, ret_person, ret_box = self._limited_get(images[start: start + self.batch_size])
-            face_list += ret_face
-            person_nums += ret_person
-            bboxes += ret_box
-        return face_list, person_nums, bboxes
+            ret.extend(self._limited_get(images[start: start + self.batch_size]))
+        if self.size_range is not None:
+            ret = self._filter(ret)
+        return ret
 
     def _limited_get(self, images):
         h, w = images.shape[1:3]
-        pils = [Image.fromarray(img).resize((w // self.down_sample, h // self.down_sample)) for img in images]
+        if h * w < 1280 * 720:
+            down_sample = max(1, self.down_sample // 2)
+        elif h * w >= 1280 * 720 * 4:
+            down_sample = self.down_sample * 2
+        else:
+            down_sample = self.down_sample
+        pils = [Image.fromarray(img).resize((w // down_sample, h // down_sample)) for img in images]
         bboxes, probs = self.extractor.detect(pils)
 
-        facelist, person_nums, box_list = [], [], []
+        ret = []
         for boxes, img, prob in zip(bboxes, images, probs):
+            faceInfo = []
             if boxes is not None:
-                facelist.append([self._rectang_crop(img, box) for box in boxes * self.down_sample])
-                box_list.append([self._get_boundingbox(box, w, h) for box in boxes * self.down_sample])
-                person_nums.append(np.sum(prob > 0.9))
+                faceInfo = [FaceInfo(face=self._rectang_crop(img, box), box=self._get_boundingbox(box, w, h), prob=p)
+                            for box, p in zip(boxes * down_sample, prob)]
             elif self.keep_empty:
-                facelist.append([])
-                box_list.append([])
-                person_nums.append(0)
+                continue
+            ret.append(faceInfo)
+        return ret
 
-        assert len(person_nums) == len(facelist)
-        return facelist, person_nums, box_list
+    def _filter(self, ret):
+        new_ret = []
+        for frames in ret:
+            ret_frame = []
+            for face in frames:
+                size = (face.box[2]-face.box[0])*(face.box[3]-face.box[1])
+                if self.size_range[0] < size < self.size_range[1] and face.prob>self.prob_limit:
+                    ret_frame.append(face)
+            new_ret.append(ret_frame)
+        return new_ret
 
 
+# TODO: change return type
 class Dlib_extractor(Face_extractor):
     def __init__(self):
         import dlib
@@ -241,18 +259,18 @@ class Dlib_extractor(Face_extractor):
         faces = self.extractor(gray, 0)
         bboxes = [[face.left(), face.top(), face.right(), face.bottom()] for face in faces]
         facelist = [self._rectang_crop(image, box) for box in bboxes]
-
         return facelist, len(facelist), bboxes
 
 
+# TODO: change return type
 class BlazeFace_extractor(Face_extractor):
-    def __init__(self, blaze_weight, anchors, scale:float=1.0):
+    def __init__(self, blaze_weight, anchors, scale: float = 1.0):
         super().__init__()
         face_detector = BlazeFace().to(device)
         face_detector.load_weights(blaze_weight)
         face_detector.load_anchors(anchors)
         _ = face_detector.train(False)
-        self.extractor = FaceExtractor(face_detector, margin=scale-1)
+        self.extractor = FaceExtractor(face_detector, margin=scale - 1)
 
     def _get(self, images):
         ret = self.extractor.process_video(images)
@@ -266,26 +284,18 @@ class BlazeFace_extractor(Face_extractor):
 
 class Inference_model:
     def __init__(self):
+        self.pre_mean, self.pre_std = [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
+        self.transform = Compose([ToTensor(), Normalize(self.pre_mean, self.pre_std)])
         pass
 
-    @staticmethod
-    def data_transform():
-        # transform to Tensor
-        pre_trained_mean, pre_trained_std = [0.439, 0.328, 0.304], [0.232, 0.206, 0.201]
-        return Compose([ToTensor(), Normalize(pre_trained_mean, pre_trained_std)])
-
-    @staticmethod
-    def tta(pil_img):
-        assert pil_img.size == (224, 224)
-        return [pil_img, RandomHorizontalFlip(p=1)(pil_img)]
-
-    @staticmethod
-    def predict(batch):
-        print(batch[0])
+    def solve(self, frames: list) -> float:
         return 0.5
 
+    def predict_batch(self, batch) -> np.ndarray:
+        return np.array([0.5]*len(batch))
+
     @staticmethod
-    def getx(faoa):
+    def _getx(faoa):
         l = np.float64(0)
         r = np.float64(1)
         while r - l > 5e-8:
@@ -296,16 +306,58 @@ class Inference_model:
                 l = mid
         return (r + l) / 2
 
-    def give_predict(self, y):
+    def _ensemble(self, y: list) -> float:
+        y = np.array(y)
         y = y.clip(5e-8, 1 - 5e-8)
         faoa = np.sum(np.log(1 - y)) / np.sum(np.log(y))
-        ret = self.getx(faoa)
-        if ret > 0.7 and len(y[y < 0.5]) > 0:
-            return self.give_predict(y[y > 0.5])
+        ret = self._getx(faoa)
         return ret
 
-    def test(self, shape=(1, 3, 224, 224)):
-        return self.predict(torch.rand(shape))
+    def test(self, shape=(10, 1920, 1080, 3)):
+        return self.solve(np.rand(shape))
+
+
+class FaceInferenceModel(Inference_model):
+    def __init__(self, face_extractor=None):
+        super().__init__()
+        self.face_extractor = face_extractor
+        self.batch_size = 32
+
+    def _tta(self, pil_img):
+        assert pil_img.size == (224, 224)
+        return [pil_img, RandomHorizontalFlip(p=1)(pil_img)]
+
+    def solve(self, frames: list) -> float:
+        assert self.face_extractor is not None
+        faces = self.face_extractor.get_faces(frames, only_one=False)
+        return self.solve_faces(faces)
+
+    def solve_faces(self, faces: list) -> float:
+        inputs = []
+        image_id = []
+        cnt = 0
+        for faceInFrame in faces:
+            ids = []
+            for face in faceInFrame:
+                ttas = []
+                pils = self._tta(Image.fromarray(face.face).resize((224, 224)))
+                for pic in pils:
+                    inputs.append(self.transform(pic))
+                    ttas.append(cnt)
+                    cnt += 1
+                ids.append(ttas)
+            if len(ids) > 0:
+                image_id.append(ids)
+
+        output = self.predict_all(torch.stack(inputs))
+        result = self._ensemble([np.max([self._ensemble([output[tta] for tta in face]) for face in frame]) for frame in image_id])
+        return result
+
+    def predict_all(self, batch) -> np.ndarray:
+        ret = []
+        for start in range(0, len(batch), self.batch_size):
+            ret.extend(self.predict_batch(batch[start:start+self.batch_size]))
+        return np.array(ret)
 
 
 def show(images):

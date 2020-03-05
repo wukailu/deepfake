@@ -3,6 +3,7 @@ from tqdm import tqdm
 from apex import amp
 import numpy as np
 import os
+import random
 
 from model1.utils import visualize_metrics, display_predictions_on_image, get_input_with_label
 from sklearn.metrics import roc_auc_score as extra_metric
@@ -81,6 +82,9 @@ def train_one_epoch(epoch, model, train_dl, max_lr, optimizer, criterion, schedu
 
 
 def validate(model, val_dl, criterion, records):
+    np.random.seed(2018011328)
+    random.seed(2018011328)
+
     # val
     model.eval()
     val_loss = 0
@@ -108,6 +112,8 @@ def validate(model, val_dl, criterion, records):
     all_predictions = np.concatenate(all_predictions, axis=0)
     extra_score = extra_metric(all_labels, all_predictions)
 
+    if val_loss == np.nan:
+        val_loss = len(val_dl)*18
     records.val_losses.append(val_loss / len(val_dl))
     records.val_accs.append(correct_count / total)
     records.val_custom_metrics.append(extra_score)

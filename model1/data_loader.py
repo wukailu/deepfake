@@ -8,7 +8,6 @@ from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
 from torch.utils.data import DataLoader
-import settings
 import random
 
 
@@ -56,7 +55,7 @@ class DFDCDataset(Dataset):
     def __len__(self):
         return len(self.real_filename)
 
-    def __get_transformed_face(self, filename: str, frame: int) -> (torch.Tensor, pathlib.Path):
+    def __get_transformed_face(self, filename: str, frame: int, trans) -> (torch.Tensor, pathlib.Path):
         cached_dir = self.cached_path / filename.split('.')[0]
         cached_file = cached_dir / (str(frame) + '.png')
 
@@ -68,6 +67,10 @@ class DFDCDataset(Dataset):
             raise IOError("cache not found")
 
         assert face.size == (224, 224)
+
+        img = np.array(face)
+        face = Image.fromarray(trans(**{"image": img})["image"])
+
         image = self.transform(face)
         return image, cached_file
 
@@ -80,12 +83,19 @@ class DFDCDataset(Dataset):
             frame = np.random.choice(frames)
 
             temp_seed = np.random.randint(0, 2e9)
+
+            import albumentations as aug
+            trans = aug.OneOf([
+                aug.Downscale(0.5, 0.5, p=0.66),
+                aug.JpegCompression(quality_lower=20, quality_upper=20, p=0.66),
+                aug.Flip(p=0)])
+
             if self.same_transform:
                 random.seed(temp_seed)
-            real_image, real_file = self.__get_transformed_face(real_fn, frame)
+            real_image, real_file = self.__get_transformed_face(real_fn, frame, trans)
             if self.same_transform:
                 random.seed(temp_seed)
-            fake_image, fake_file = self.__get_transformed_face(fake_fn, frame)
+            fake_image, fake_file = self.__get_transformed_face(fake_fn, frame, trans)
 
             return {'real': real_image, 'fake': fake_image, 'real_file': real_file, 'fake_file': fake_file}
         except (IOError, KeyError) as e:
@@ -97,11 +107,20 @@ def get_transforms(params, image_size=224):
     tensor_transform = []
 
     train_transforms = [transforms.RandomHorizontalFlip()]
-    if params['RandomAffine'] != 0:
-        if params['RandomAffine'] == 1:
-            train_transforms.append(transforms.RandomAffine(degrees=20, scale=(.8, 1.2), shear=0))
-        elif params['RandomAffine'] == 2:
-            train_transforms.append(transforms.RandomAffine(degrees=40, scale=(.7, 1.3), shear=0))
+    if params['RandomScale'] != 0:
+        if params['RandomScale'] == 1:
+            train_transforms.append(transforms.RandomAffine(scale=(.9, 1.1)))
+        elif params['RandomScale'] == 2:
+            train_transforms.append(transforms.RandomAffine(scale=(.8, 1.2)))
+        elif params['RandomScale'] == 3:
+            train_transforms.append(transforms.RandomAffine(scale=(.7, 1.3)))
+    if params['RandomRotate'] != 0:
+        if params['RandomRotate'] == 1:
+            train_transforms.append(transforms.RandomAffine(degrees=10))
+        elif params['RandomRotate'] == 2:
+            train_transforms.append(transforms.RandomAffine(degrees=20))
+        elif params['RandomRotate'] == 3:
+            train_transforms.append(transforms.RandomAffine(degrees=30))
     elif params['ColorJitter'] != 0:
         if params['ColorJitter'] == 1:
             train_transforms.append(transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2))
@@ -112,11 +131,15 @@ def get_transforms(params, image_size=224):
             train_transforms.append(transforms.RandomPerspective(distortion_scale=0.1))
         elif params['RandomPerspective'] == 2:
             train_transforms.append(transforms.RandomPerspective(distortion_scale=0.2))
+        elif params['RandomPerspective'] == 3:
+            train_transforms.append(transforms.RandomPerspective(distortion_scale=0.3))
     elif params['RandomErasing'] != 0:
         if params['RandomErasing'] == 1:
-            tensor_transform.append(transforms.RandomErasing(scale=(0.02, 0.15), ratio=(0.3, 1.6)))
+            tensor_transform.append(transforms.RandomErasing(scale=(0.1, 0.3), ratio=(0.2, 5)))
         elif params['RandomErasing'] == 2:
-            tensor_transform.append(transforms.RandomErasing(scale=(0.1, 0.5), ratio=(0.2, 5)))
+            tensor_transform.append(transforms.RandomErasing(scale=(0.3, 0.4), ratio=(0.2, 5)))
+        elif params['RandomErasing'] == 3:
+            tensor_transform.append(transforms.RandomErasing(scale=(0.4, 0.5), ratio=(0.2, 5)))
     elif params['RandomCrop'] != 0:
         train_transforms.append(transforms.Resize(image_size + 32))
         train_transforms.append(transforms.RandomCrop(image_size, padding_mode='constant'))
@@ -144,11 +167,13 @@ def create_dataloaders(params: dict):
     train_transforms, val_transforms = get_transforms(params, image_size=224)
     metadata = pd.read_json(params['metadata_path']).T
     bbox = pd.read_csv(params['bbox_path'], index_col=[0, 1, 2])
-    loader = 64
+    loader = 16
+    # train_dl = _create_dataloader(metadata[metadata['split_kailu'] == 'validation'], bbox, params, train_transforms,
+    #                             train_data_filter, shuffle=True, num_workers=loader, repeate=5)
     train_dl = _create_dataloader(metadata[metadata['split_kailu'] == 'train'], bbox, params, train_transforms,
                                   train_data_filter, shuffle=True, num_workers=loader)
     val_dl = _create_dataloader(metadata[metadata['split_kailu'] == 'validation'], bbox, params, val_transforms,
-                                val_data_filter, shuffle=False, num_workers=loader)
+                                train_data_filter, shuffle=False, num_workers=loader, repeate=2)
     test_dl = _create_dataloader(metadata[metadata['split_kailu'] == 'test'], bbox, params, val_transforms,
                                  val_data_filter, shuffle=False, num_workers=loader)
 
@@ -156,10 +181,12 @@ def create_dataloaders(params: dict):
 
 
 def _create_dataloader(metadata: DataFrame, bbox: DataFrame, params: dict, transform, data_filter,
-                       num_workers=4, shuffle=True):
+                       num_workers=4, shuffle=True, repeate=1):
     assert len(metadata) != 0, f'metadata are empty'
 
     ds = DFDCDataset(metadata=metadata, bbox=bbox, params=params, transform=transform, data_filter=data_filter)
+    if repeate > 1:
+        ds = torch.utils.data.ConcatDataset([ds]*repeate)
     dl = DataLoader(ds, batch_size=params['batch_size'], num_workers=num_workers, shuffle=shuffle,
                     collate_fn=collate_fn, drop_last=True)
 

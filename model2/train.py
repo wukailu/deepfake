@@ -122,9 +122,10 @@ class Trainer(object):
             inputs, labels, data = next(self.visual_iter)
 
         loss, output = self.forward(inputs, labels)
+        output = torch.sigmoid(output.detach().cpu())
         self.writer.add_images(f'validate/{self.current_epoch}_inputs.png', self.unnorm(inputs), self.current_epoch)
         self.writer.add_images(f'validate/{self.current_epoch}_mask.png', labels, self.current_epoch)
-        self.writer.add_images(f'validate/{self.current_epoch}_predict.png', output, self.current_epoch)
+        self.writer.add_images(f'validate/{self.current_epoch}_predict.png',  output, self.current_epoch)
         print(f'Epoch {self.current_epoch}: val loss={loss:.4f} | val iou={iou:.4f}')
 
     def start(self):

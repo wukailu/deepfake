@@ -42,8 +42,8 @@ def collate_fn(batch: list):
         ret['fake'] = torch.stack(ret['fake'])
     except:
         print(">>>>>>>>>>>>>>>>>>len(real) == 0<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<")
-        ret['real'] = torch.zeros((1, 3, 960, 540))
-        ret['fake'] = torch.zeros((1, 3, 960, 540))
+        ret['real'] = torch.zeros((1, 3, 960, 512))
+        ret['fake'] = torch.zeros((1, 3, 960, 512))
 
     inputs = torch.cat([ret['fake'], ret['real']], dim=0)
     mask = gen_mask(ret['real'], ret['fake'])
@@ -105,7 +105,7 @@ class DFDCDataset(Dataset):
 
             return {'real': real_image, 'fake': fake_image, 'real_file': real_file, 'fake_file': fake_file}
         except IOError as e:
-            print(e)
+            # print(e)
             return {'real': None, 'fake': None, 'real_file': None, 'fake_file': None}
 
 

@@ -71,6 +71,7 @@ train_dl, val_dl, test_dl, val_dl_iter = create_dataloaders(params)
 if settings.USE_FOUNDATIONS:
     foundations.log_params(params)
 
+print(params)
 print('Training start..')
 # Train
 train(train_dl, val_dl, test_dl, val_dl_iter, model, optimizer, params['n_epochs'], params['max_lr'], scheduler,

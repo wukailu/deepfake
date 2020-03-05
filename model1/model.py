@@ -2,6 +2,7 @@ import torchvision.models as models
 import torch.nn as nn
 import torch
 from efficientnet_pytorch import EfficientNet
+from numpy.random import choice
 
 
 def check_model_block(model):
@@ -63,46 +64,69 @@ def get_classifier(in_features, use_hidden_layer, dropout):
         )
 
 
+def freeze_resnet(model, params):
+    freeze = params['freeze']
+    if freeze != 0:
+        freeze = choice([2, 4])
+        freeze_until(model, f"layer{freeze}.0.conv1.weight")
+    params['freeze'] = int(freeze)
+    return model, params
+
+
 def create_model(use_hidden_layer, dropout, backbone, params):
     if backbone == 1:
         model = models.resnet18(pretrained=True)
         model.fc = get_classifier(model.fc.in_features, use_hidden_layer, dropout)
         params['batch_size'] = 256
+        model, params = freeze_resnet(model, params)
     elif backbone == 2:
         model = models.resnet34(pretrained=True)
         model.fc = get_classifier(model.fc.in_features, use_hidden_layer, dropout)
+        model, params = freeze_resnet(model, params)
     elif backbone == 3:
         model = models.resnet50(pretrained=True)
         model.fc = get_classifier(model.fc.in_features, use_hidden_layer, dropout)
+        model, params = freeze_resnet(model, params)
     elif backbone == 4:
         model = models.resnet101(pretrained=True)
         model.fc = get_classifier(model.fc.in_features, use_hidden_layer, dropout)
+        model, params = freeze_resnet(model, params)
+        # 1 or 2 is better than 0
     elif backbone == 5:
         model = models.densenet121(pretrained=True)
         model.classifier = get_classifier(model.classifier.in_features, use_hidden_layer, dropout)
+        # TODO: update freeze
+        params['freeze'] = 0
     elif backbone == 6:
         model = EfficientNet.from_pretrained('efficientnet-b1', num_classes=23)
         model._dropout = nn.Dropout(0)
         model._fc = get_classifier(model._fc.in_features, use_hidden_layer, dropout)
+        # TODO: update freeze
+        params['freeze'] = 0
     elif backbone == 7:
         model = EfficientNet.from_pretrained('efficientnet-b4', num_classes=23)
         model._dropout = nn.Dropout(0)
         model._fc = get_classifier(model._fc.in_features, use_hidden_layer, dropout)
-        # freeze_until(model, "_blocks.4._expand_conv.weight")
+        if params['freeze'] != 0:
+            freeze = choice(list(range(5, 15)))
+            freeze_until(model, f"_blocks.{freeze}._expand_conv.weight")
+            params['freeze'] = int(freeze)
     elif backbone == 8:
         model = EfficientNet.from_pretrained('efficientnet-b7', num_classes=23)
         model._dropout = nn.Dropout(0)
         model._fc = get_classifier(model._fc.in_features, use_hidden_layer, dropout)
-        params['batch_size'] = 32
+        params['batch_size'] = params['batch_size'] // 2
+        # TODO: update freeze
+        params['freeze'] = 0
     elif backbone == 9:
         model = models.resnext50_32x4d(pretrained=True)
         model.fc = get_classifier(model.fc.in_features, use_hidden_layer, dropout)
-        # TODO: add this to hyper-parameter search
-        freeze_until(model, "layer4.0.conv1.weight")
+        model, params = freeze_resnet(model, params)
     else:
         print("Unrecognized model name, using resnet18")
         model = models.resnet18(pretrained=True)
         model.fc = get_classifier(model.fc.in_features, use_hidden_layer, dropout)
+        model, params = freeze_resnet(model, params)
 
     print(model)
     model = model.cuda()
