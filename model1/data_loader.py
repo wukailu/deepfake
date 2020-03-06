@@ -109,11 +109,11 @@ def get_transforms(params, image_size=224):
     train_transforms = [transforms.RandomHorizontalFlip()]
     if params['RandomScale'] != 0:
         if params['RandomScale'] == 1:
-            train_transforms.append(transforms.RandomAffine(scale=(.9, 1.1)))
+            train_transforms.append(transforms.RandomAffine(degrees=0, scale=(.9, 1.1)))
         elif params['RandomScale'] == 2:
-            train_transforms.append(transforms.RandomAffine(scale=(.8, 1.2)))
+            train_transforms.append(transforms.RandomAffine(degrees=0, scale=(.8, 1.2)))
         elif params['RandomScale'] == 3:
-            train_transforms.append(transforms.RandomAffine(scale=(.7, 1.3)))
+            train_transforms.append(transforms.RandomAffine(degrees=0, scale=(.7, 1.3)))
     if params['RandomRotate'] != 0:
         if params['RandomRotate'] == 1:
             train_transforms.append(transforms.RandomAffine(degrees=10))
@@ -140,6 +140,8 @@ def get_transforms(params, image_size=224):
             tensor_transform.append(transforms.RandomErasing(scale=(0.3, 0.4), ratio=(0.2, 5)))
         elif params['RandomErasing'] == 3:
             tensor_transform.append(transforms.RandomErasing(scale=(0.4, 0.5), ratio=(0.2, 5)))
+        elif params['RandomErasing'] == 4:
+            tensor_transform.append(transforms.RandomErasing(scale=(0.5, 0.6), ratio=(0.2, 5)))
     elif params['RandomCrop'] != 0:
         train_transforms.append(transforms.Resize(image_size + 32))
         train_transforms.append(transforms.RandomCrop(image_size, padding_mode='constant'))

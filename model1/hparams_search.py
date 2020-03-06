@@ -38,22 +38,22 @@ def generate_params():
     params = {'batch_size': int(choice([32])),
               'n_epochs': int(choice([40])),
               'weight_decay': float(choice([0.00001])),  # 0, 0.00001, 0.0001
-              'dropout': float(choice([0.3, 0.5, 0.9])),  # 0 0.3 [0.5] 0.7 0.9 (0)
+              'dropout': float(choice([0.5, 0.7, 0.9])),  # 0 0.3 [0.5] 0.7 0.9 (0)
 
               'RandomScale': int(choice([0, 1, 2])),  # (2)
               'RandomRotate': int(choice([0, 1, 2])),  # (2)
-              'ColorJitter': int(choice([0, 1])),  # (0)
+              'ColorJitter': int(choice([0])),  # (0)
               'RandomPerspective': int(choice([0, 1, 2])),  # (1)
-              'RandomErasing': int(choice([1, 2, 3])),  # (2)
-              'RandomCrop': int(choice([1])),  # (0)
+              'RandomErasing': int(choice([1, 2, 3, 4])),  # (2)
+              'RandomCrop': int(choice([0, 1])),  # (0)
               'freeze': int(choice([0, 1])),
 
-              'max_lr': float(choice([0.003, 0.001, 0.0003, 0.0001])),  # 0.0003 [0.0001] (0.001)
-              'use_lr_scheduler': int(choice([0, 1])),  # 0, 1 (2)
-              'scheduler_gamma': float(choice([0.9, 0.95])),  # 0.96, 0.95, 0.94 (0.96)
+              'max_lr': float(choice([0.01, 0.007, 0.003, 0.001])),  # 0.0003 [0.0001] (0.001)
+              'use_lr_scheduler': int(choice([0, 2])),  # 0, 1 (2)
+              'scheduler_gamma': float(choice([0.9])),  # 0.96, 0.95, 0.94 (0.96)
               'use_hidden_layer': int(choice([0])),  # 0, (1)
               'backbone': int(choice([7])),  # 1, 2, 3, 4, 5, 6, 7, 8, 9
-              'same_transform': int(choice([0, 1])),
+              'same_transform': int(choice([0])),  # TODO: Why
               'val_rate': 1,
               'data_path': settings.DATA_DIR,
               'metadata_path': int(choice(list(range(len(settings.meta_data_path))))),  # 0, 1, 2

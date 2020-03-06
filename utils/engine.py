@@ -349,6 +349,8 @@ class FaceInferenceModel(Inference_model):
             if len(ids) > 0:
                 image_id.append(ids)
 
+        if len(inputs) == 0:
+            return 0.5
         output = self.predict_all(torch.stack(inputs))
         result = self._ensemble([np.max([self._ensemble([output[tta] for tta in face]) for face in frame]) for frame in image_id])
         return result
