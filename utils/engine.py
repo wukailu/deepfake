@@ -101,8 +101,13 @@ class FastDataset(Dataset):
 
 
 class Cache_loader:
-    def __init__(self, video_paths):
+    def __init__(self, video_paths, cache_folder=""):
+        from settings import face_cache_path
         self.paths = video_paths
+        if cache_folder == "":
+            self.cache_folder = face_cache_path
+        else:
+            self.cache_folder = cache_folder
 
     def __len__(self):
         return len(self.paths)
@@ -113,11 +118,9 @@ class Cache_loader:
             return []
         return list(ret.values())
 
-    @staticmethod
-    def extract_video(video_path):
-        from settings import face_cache_path
+    def extract_video(self, video_path):
         filename = video_path.split('/')[-1].split('.')[0]
-        cache_path = os.path.join(face_cache_path, filename)
+        cache_path = os.path.join(self.cache_folder, filename)
         if os.path.exists(cache_path):
             ret = {}
             for root, subdirs, files in os.walk(cache_path):
@@ -223,6 +226,12 @@ class MTCNN_extractor(Face_extractor):
             if boxes is not None:
                 faceInfo = [FaceInfo(face=self._rectang_crop(img, box), box=self._get_boundingbox(box, w, h), prob=p)
                             for box, p in zip(boxes * down_sample, prob)]
+                faceInfo = sorted(faceInfo, key=lambda x: x.prob)
+                if len(faceInfo) >= 2:
+                    if faceInfo[-1].prob - faceInfo[-2].prob > 0.05:
+                        faceInfo = faceInfo[-1:]
+                    else:
+                        faceInfo = faceInfo[-2:]
             elif self.keep_empty:
                 continue
             ret.append(faceInfo)

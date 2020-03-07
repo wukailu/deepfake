@@ -143,8 +143,12 @@ def get_transforms(params, image_size=224):
         elif params['RandomErasing'] == 4:
             tensor_transform.append(transforms.RandomErasing(scale=(0.5, 0.6), ratio=(0.2, 5)))
     elif params['RandomCrop'] != 0:
-        train_transforms.append(transforms.Resize(image_size + 32))
-        train_transforms.append(transforms.RandomCrop(image_size, padding_mode='constant'))
+        if params['RandomCrop'] == 1:
+            train_transforms.append(transforms.Resize(image_size + 32))
+            train_transforms.append(transforms.RandomCrop(image_size, padding_mode='constant'))
+        elif params['RandomCrop'] == 2:
+            train_transforms.append(transforms.Resize(image_size + 64))
+            train_transforms.append(transforms.RandomCrop(image_size, padding_mode='constant'))
 
     train_transforms = transforms.Compose(train_transforms)
     tensor_transform = transforms.Compose(tensor_transform)

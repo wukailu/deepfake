@@ -60,7 +60,7 @@ if params['use_lr_scheduler'] == 0:
 elif params['use_lr_scheduler'] == 1:
     scheduler = lr_scheduler.ExponentialLR(optimizer, gamma=params['scheduler_gamma'])
 elif params['use_lr_scheduler'] == 2:
-    scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
+    scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=7)
 
 
 print('Creating datasets')
