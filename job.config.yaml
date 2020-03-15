@@ -1,5 +1,5 @@
 # Project config #
-project_name: 'DeepFake-Detection-input_aug_seed_new_aug'
+project_name: 'DeepFake-Detection-input_aug_seed_new_aug_new_data'
 log_level: INFO
 
 # Worker config #

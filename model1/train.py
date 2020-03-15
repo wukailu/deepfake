@@ -34,7 +34,7 @@ class Records:
         return ['train_losses', 'val_accs', 'val_custom_metrics', 'val_losses']
 
 
-def train_one_epoch(epoch, model, train_dl, max_lr, optimizer, criterion, scheduler, records, record_eval):
+def train_one_epoch(epoch, model, train_dl, max_lr, optimizer, criterion, scheduler, records, batch_repeat):
     model.train()
     train_loss = 0
     train_loss_eval = 0
@@ -44,26 +44,31 @@ def train_one_epoch(epoch, model, train_dl, max_lr, optimizer, criterion, schedu
     total = 0
     correct_count = 0
     correct_count_eval = 0
+    cnt = 0
 
+    optimizer.zero_grad()
     for step, data in enumerate(train_tk):
         inputs, labels = get_input_with_label(data)
 
         model.train()
-        optimizer.zero_grad()
 
         outputs = model(inputs)
         predicted = torch.sigmoid(outputs.data) > 0.5
 
         total += labels.size(0)
         correct_count += (predicted == labels).sum().item()
-        loss = criterion(outputs, labels)
+        loss = criterion(outputs, labels) / batch_repeat
 
         with amp.scale_loss(loss, optimizer) as scaled_loss:
             scaled_loss.backward()
-        optimizer.step()
 
-        train_loss += loss.item()
+        if (cnt+1) % batch_repeat == 0:
+            optimizer.step()
+            optimizer.zero_grad()
+
+        train_loss += loss.item() * batch_repeat
         train_tk.set_postfix(loss=train_loss / (step + 1), acc=correct_count / total)
+        cnt = cnt+1
 
     if scheduler is not None:
         records.lrs += scheduler.get_lr()
@@ -113,7 +118,7 @@ def validate(model, val_dl, criterion, records):
     extra_score = extra_metric(all_labels, all_predictions)
 
     if val_loss == np.nan:
-        val_loss = len(val_dl)*18
+        val_loss = len(val_dl) * 18
     records.val_losses.append(val_loss / len(val_dl))
     records.val_accs.append(correct_count / total)
     records.val_custom_metrics.append(extra_score)
@@ -121,14 +126,18 @@ def validate(model, val_dl, criterion, records):
           f'val {extra_metric.__name__}={records.val_custom_metrics[-1]:.4f}')
 
 
-def train(train_dl, val_dl, test_dl, val_dl_iter, model, optimizer, n_epochs, max_lr, scheduler, criterion, val_rate):
+def train(train_dl, val_dl, test_dl, val_dl_iter, model, optimizer, scheduler, criterion, params):
+    n_epochs = params['n_epochs']
+    max_lr = params['max_lr']
+    val_rate = params['val_rate']
+    batch_repeat = params['batch_repeat']
     records = Records()
     best_metric = 1e9
 
     os.makedirs('checkpoints', exist_ok=True)
 
     for epoch in range(n_epochs):
-        train_one_epoch(epoch, model, train_dl, max_lr, optimizer, criterion, scheduler, records, record_eval=False)
+        train_one_epoch(epoch, model, train_dl, max_lr, optimizer, criterion, scheduler, records, batch_repeat)
         if epoch % val_rate == 0:
             validate(model, val_dl, criterion, records)
             # validate(model, test_dl, criterion, records)

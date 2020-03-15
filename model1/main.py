@@ -35,6 +35,7 @@ print(params)
 # params = {'batch_size': 64, 'n_epochs': 100, 'weight_decay': 0.0001, 'dropout': 0.7, 'augment_level': 3, 'max_lr': 0.0003, 'use_lr_scheduler': 0, 'scheduler_gamma': 0.95, 'use_hidden_layer': 0, 'backbone': 'resnet34', 'val_rate': 1, 'data_path': '/data1/data/deepfake/dfdc_train', 'metadata_path': '/data1/data/deepfake/dfdc_train/metadata_kailu.json', 'bbox_path': '/data1/data/deepfake/bbox_real.csv', 'cache_path': '/data1/data/deepfake/face/', 'seed': 1378744497}
 
 params['metadata_path'] = settings.meta_data_path[params['metadata_path']]
+params['n_epochs'] *= params['batch_repeat']
 
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
@@ -51,6 +52,9 @@ params_to_update = get_trainable_params(model)
 
 print('Creating optimizer')
 # Create optimizer and learning rate schedules
+if params['use_lr_scheduler'] == 3:
+    params['max_lr'] = params['max_lr'] * 10
+
 optimizer = optim.Adam(params_to_update, lr=params['max_lr'], weight_decay=params['weight_decay'])
 model, optimizer = amp.initialize(model, optimizer, opt_level='O1', verbosity=0)
 
@@ -61,6 +65,10 @@ elif params['use_lr_scheduler'] == 1:
     scheduler = lr_scheduler.ExponentialLR(optimizer, gamma=params['scheduler_gamma'])
 elif params['use_lr_scheduler'] == 2:
     scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=7)
+elif params['use_lr_scheduler'] == 3:
+    scheduler = lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
+else:
+    scheduler = None
 
 
 print('Creating datasets')
@@ -74,5 +82,5 @@ if settings.USE_FOUNDATIONS:
 print(params)
 print('Training start..')
 # Train
-train(train_dl, val_dl, test_dl, val_dl_iter, model, optimizer, params['n_epochs'], params['max_lr'], scheduler,
-      criterion, params['val_rate'])
+train(train_dl, val_dl, test_dl, val_dl_iter, model, optimizer, scheduler,
+      criterion, params)

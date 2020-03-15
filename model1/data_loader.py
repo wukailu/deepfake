@@ -9,6 +9,7 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 from torch.utils.data import DataLoader
 import random
+import os
 
 
 def collate_fn(batch: list):
@@ -56,7 +57,7 @@ class DFDCDataset(Dataset):
         return len(self.real_filename)
 
     def __get_transformed_face(self, filename: str, frame: int, trans) -> (torch.Tensor, pathlib.Path):
-        cached_dir = self.cached_path / filename.split('.')[0]
+        cached_dir = self.cached_path / filename.split('.')[0] / str(0)
         cached_file = cached_dir / (str(frame) + '.png')
 
         if cached_file.is_file():
@@ -66,7 +67,7 @@ class DFDCDataset(Dataset):
         else:
             raise IOError("cache not found")
 
-        assert face.size == (224, 224)
+        # assert face.size == (224, 224)
 
         img = np.array(face)
         face = Image.fromarray(trans(**{"image": img})["image"])
@@ -79,8 +80,8 @@ class DFDCDataset(Dataset):
         fake_fn = np.random.choice(self.real2fakes[real_fn])
 
         try:
-            frames = self.bbox_df.xs(real_fn, level=0).index.get_level_values(0)
-            frame = np.random.choice(frames)
+            files = os.listdir(self.cached_path / real_fn.split(".")[0] / str(0))
+            frame = np.random.choice(sorted([int(file.split(".")[0]) for file in files]))
 
             temp_seed = np.random.randint(0, 2e9)
 
@@ -173,7 +174,7 @@ def create_dataloaders(params: dict):
     train_transforms, val_transforms = get_transforms(params, image_size=224)
     metadata = pd.read_json(params['metadata_path']).T
     bbox = pd.read_csv(params['bbox_path'], index_col=[0, 1, 2])
-    loader = 16
+    loader = 8
     # train_dl = _create_dataloader(metadata[metadata['split_kailu'] == 'validation'], bbox, params, train_transforms,
     #                             train_data_filter, shuffle=True, num_workers=loader, repeate=5)
     train_dl = _create_dataloader(metadata[metadata['split_kailu'] == 'train'], bbox, params, train_transforms,

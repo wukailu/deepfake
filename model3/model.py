@@ -1,7 +1,5 @@
-import segmentation_models_pytorch as smp
-import torchvision.models as models
-import torch.nn as nn
-import torch
+from model3.tsm.ops.models import TSN
+from torch import nn
 
 
 def print_model_params(model):
@@ -24,14 +22,13 @@ def get_trainable_params(model):
 def create_model(params):
     backbone = params['backbone']
     if backbone == 1:
-        model = smp.Unet(encoder_name="resnet34", classes=1)
-        # model = models.segmentation.fcn_resnet50(pretrained=True, num_classes=1)
-    # elif backbone == 2:
-    #     model = torch.hub.load('pytorch/vision:v0.5.0', 'deeplabv3_resnet101', pretrained=True)
+        model = TSN(num_class=1, num_segments=params["num_segments"], modality="RGB",
+                    base_model="resnet50", dropout=params["dropout"], partial_bn=False,
+                    is_shift=True, shift_div=params["shift_div"], fc_lr5=True)
     else:
-        raise Exception("Unrecognized model name, using resnet18")
+        raise NotImplementedError()
 
-    print(model)
-    model = model.cuda()
-    return model, params
+    # print(model)
+    return model.cuda(), params
+
 

@@ -140,7 +140,7 @@ class Cache_loader:
         return faces
 
 
-FaceInfo = namedtuple("FaceInfo", ['face', 'box', 'prob'])
+FaceInfo = namedtuple("FaceInfo", ['face', 'box', 'prob', 'frame'])
 
 
 class Face_extractor:
@@ -148,14 +148,13 @@ class Face_extractor:
         pass
 
     @staticmethod
-    def _get_boundingbox(bbox, width, height, scale=1.2, minsize=None):
+    def _get_boundingbox(bbox, width, height, scale=1.2, min_size=None, max_size=None):
         x1, y1, x2, y2 = bbox[:4]
-        if not 0.33 < (x2 - x1) / (y2 - y1) < 3:
-            return np.array([0, 0, 0, 0])
         size_bb = int(max(x2 - x1, y2 - y1) * scale)
-        if minsize:
-            if size_bb < minsize:
-                size_bb = minsize
+        if min_size and size_bb < min_size:
+            size_bb = min_size
+        if max_size and size_bb > max_size:
+            size_bb = max_size
         center_x, center_y = (x1 + x2) // 2, (y1 + y2) // 2
 
         x1 = max(int(center_x - size_bb / 2), 0)
@@ -165,11 +164,9 @@ class Face_extractor:
 
         return np.array([x1, y1, x1 + size_bb, y1 + size_bb]).astype(int)
 
-    def _rectang_crop(self, image, bbox, with_bbox=False):
+    def _rectang_crop(self, image, bbox, scale=1.2, min_size=None, max_size=None):
         height, width = image.shape[:2]
-        l, t, r, b = self._get_boundingbox(bbox, width, height)
-        if with_bbox:
-            return image[t:b, l:r], np.array([l, t, r, b])
+        l, t, r, b = self._get_boundingbox(bbox, width, height, scale, min_size, max_size)
         return image[t:b, l:r]
 
     def _get(self, images):
@@ -192,7 +189,8 @@ class Face_extractor:
 
 
 class MTCNN_extractor(Face_extractor):
-    def __init__(self, down_sample=2, batch_size=30, my_device=device, keep_empty=False, factor=0.709, size_range=None, prob_limit=None):
+    def __init__(self, down_sample=2, batch_size=30, my_device=device, keep_empty=False, factor=0.709, size_range=None,
+                 prob_limit=None, same_bbox_size=False, scale=1.2):
         super().__init__()
         self.prob_limit = prob_limit
         self.size_range = size_range
@@ -200,6 +198,8 @@ class MTCNN_extractor(Face_extractor):
         self.down_sample = down_sample
         self.batch_size = batch_size
         self.keep_empty = keep_empty
+        self.same_bbox_size = same_bbox_size
+        self.scale = scale
 
     def _get(self, images):
         ret = []
@@ -220,19 +220,36 @@ class MTCNN_extractor(Face_extractor):
         pils = [Image.fromarray(img).resize((w // down_sample, h // down_sample)) for img in images]
         bboxes, probs = self.extractor.detect(pils)
 
-        ret = []
-        for boxes, img, prob in zip(bboxes, images, probs):
-            faceInfo = []
+        clean_bboxes, clean_probs = [], []
+        for boxes, prob in zip(bboxes, probs):
             if boxes is not None:
-                faceInfo = [FaceInfo(face=self._rectang_crop(img, box), box=self._get_boundingbox(box, w, h), prob=p)
+                rets = sorted([(p, box) for box, p in zip(boxes, prob)], key=lambda x: x[0])
+                if len(rets) >= 2:
+                    rets = rets[-1:] if rets[-1][0] - rets[-2][0] > 0.05 else rets[-2:]
+                clean_bboxes.append(np.array([box for p, box in rets]))
+                clean_probs.append(np.array([p for p, box in rets]))
+            else:
+                clean_bboxes.append([])
+                clean_probs.append([])
+
+        bsize = sorted([max(box[2] - box[0], box[3] - box[1]) * self.scale for boxes in clean_bboxes for box in boxes * down_sample])
+        if len(bsize) > 0:
+            bsize = int(bsize[-len(bsize) // 4])  # -1//4 = -1
+
+        ret = []
+        for boxes, img, prob, idx in zip(clean_bboxes, images, clean_probs, range(len(clean_probs))):
+            faceInfo = []
+            if boxes is not None and len(boxes) > 0:
+                min_size = bsize if self.same_bbox_size else None
+                max_size = bsize if self.same_bbox_size else None
+
+                faceInfo = [FaceInfo(face=self._rectang_crop(img, box, self.scale, min_size, max_size),
+                                     box=self._get_boundingbox(box, w, h, self.scale, min_size, max_size),
+                                     prob=p,
+                                     frame=idx)
                             for box, p in zip(boxes * down_sample, prob)]
-                faceInfo = sorted(faceInfo, key=lambda x: x.prob)
-                if len(faceInfo) >= 2:
-                    if faceInfo[-1].prob - faceInfo[-2].prob > 0.05:
-                        faceInfo = faceInfo[-1:]
-                    else:
-                        faceInfo = faceInfo[-2:]
-            elif self.keep_empty:
+                faceInfo = sorted(faceInfo, key=lambda x: -x.prob)
+            elif not self.keep_empty:
                 continue
             ret.append(faceInfo)
         return ret
@@ -242,8 +259,8 @@ class MTCNN_extractor(Face_extractor):
         for frames in ret:
             ret_frame = []
             for face in frames:
-                size = (face.box[2]-face.box[0])*(face.box[3]-face.box[1])
-                if self.size_range[0] < size < self.size_range[1] and face.prob>self.prob_limit:
+                size = (face.box[2] - face.box[0]) * (face.box[3] - face.box[1])
+                if self.size_range[0] < size < self.size_range[1] and face.prob > self.prob_limit:
                     ret_frame.append(face)
             new_ret.append(ret_frame)
         return new_ret
@@ -301,7 +318,7 @@ class Inference_model:
         return 0.5
 
     def predict_batch(self, batch) -> np.ndarray:
-        return np.array([0.5]*len(batch))
+        return np.array([0.5] * len(batch))
 
     @staticmethod
     def _getx(faoa):
@@ -327,10 +344,10 @@ class Inference_model:
 
 
 class FaceInferenceModel(Inference_model):
-    def __init__(self, face_extractor=None):
+    def __init__(self, face_extractor=None, batch_size=32):
         super().__init__()
         self.face_extractor = face_extractor
-        self.batch_size = 32
+        self.batch_size = batch_size
 
     def _tta(self, pil_img):
         assert pil_img.size == (224, 224)
@@ -361,14 +378,22 @@ class FaceInferenceModel(Inference_model):
         if len(inputs) == 0:
             return 0.5
         output = self.predict_all(torch.stack(inputs))
-        result = self._ensemble([np.max([self._ensemble([output[tta] for tta in face]) for face in frame]) for frame in image_id])
+        result = self._ensemble(
+            [np.max([self._ensemble([output[tta] for tta in face]) for face in frame]) for frame in image_id])
         return result
 
     def predict_all(self, batch) -> np.ndarray:
         ret = []
         for start in range(0, len(batch), self.batch_size):
-            ret.extend(self.predict_batch(batch[start:start+self.batch_size]))
+            ret.extend(self.predict_batch(batch[start:start + self.batch_size]))
         return np.array(ret)
+
+
+class VideoInferenceModel(Inference_model):
+    def __init__(self, batch_size=32):
+        super().__init__()
+        self.batch_size = batch_size
+
 
 
 def show(images):
