@@ -32,6 +32,7 @@ else:
     print(params)
 
 params['metadata_path'] = settings.meta_data_path[params['metadata_path']]
+params['batch_size'] = params['total_batch_size'] // params['num_segments']
 
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False

@@ -163,7 +163,7 @@ def create_dataloaders(params: dict, mean=(0.485, 0.456, 0.406), std=(0.229, 0.2
 
     train_transforms, val_transforms = get_transforms(params, image_size, mean, std)
     metadata = pd.read_json(params['metadata_path']).T
-    loader = 16
+    loader = 8
     train_dl = _create_dataloader(metadata[metadata['split_kailu'] == 'train'], params, train_transforms,
                                   train_data_filter, shuffle=True, num_workers=loader)
     val_dl = _create_dataloader(metadata[metadata['split_kailu'] == 'validation'], params, val_transforms,

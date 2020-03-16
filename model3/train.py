@@ -1,6 +1,7 @@
 import torch
 from tqdm import tqdm
 from apex import amp
+import random
 from apex.parallel import DistributedDataParallel as DDP
 import numpy as np
 import os
@@ -17,13 +18,14 @@ class Trainer(object):
 
     def __init__(self, train_dl, val_dl, test_dl, model: torch.nn.Module, optimizer, scheduler, criterion, params):
         self.train_dl = train_dl
-        # val_dl = train_dl
         self.val_dl = val_dl
         self.test_dl = test_dl
         self.visual_iter = iter(val_dl)
         self.unnorm = Unnormalize(model.input_mean, model.input_std)
 
-        self.model = torch.nn.DataParallel(model).cuda()
+        # self.model = torch.nn.DataParallel(model).cuda()
+        # serious bugs due to DataParallel, may caused by BN and apex
+        self.model = model
         self.optimizer = optimizer
         self.num_epochs = params["num_epochs"]
         self.lr = params["max_lr"]
@@ -34,6 +36,7 @@ class Trainer(object):
 
         os.makedirs('checkpoints', exist_ok=True)
         os.makedirs('tensorboard', exist_ok=True)
+        # there's some bugs with dessa atlas
         if settings.USE_FOUNDATIONS:
             foundations.set_tensorboard_logdir('tensorboard')
         self.writer = SummaryWriter("tensorboard")
@@ -43,14 +46,21 @@ class Trainer(object):
         self.best_metric = 1e9
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.phase = 'train'
+        self.seeds = [np.random.randint(0, 2e9), random.randint(0, 2e9)]
         self.train()
+        self.history_best = {}
 
     def eval(self):
+        self.seeds = [np.random.randint(0, 2e9), random.randint(0, 2e9)]
+        np.random.seed(2018011328)
+        random.seed(2018011328)
         self.phase = 'test'
         self.model.eval()
         self.meter_val = Classification_Meter(self.writer, self.phase, self.current_epoch)
 
     def train(self):
+        np.random.seed(self.seeds[0])
+        random.seed(self.seeds[1])
         self.phase = 'train'
         self.model.train()
         self.meter_train = Classification_Meter(self.writer, self.phase, self.current_epoch)
@@ -118,11 +128,11 @@ class Trainer(object):
             print(f'>>> Saving best model metric={selection_metric:.4f}')
             checkpoint = {'model': self.model, 'optimizer': self.optimizer.state_dict()}
             torch.save(checkpoint, 'checkpoints/best_model.pth')
+            self.history_best = {"train_loss": float(np.mean(self.meter_train.loss)),
+                                 "val_loss": float(loss),
+                                 "val_acc": float(acc)}
             if settings.USE_FOUNDATIONS:
                 foundations.save_artifact('checkpoints/best_model.pth', key='best_model_checkpoint')
-                foundations.log_metric("train_loss", np.mean(self.meter_train.loss))
-                foundations.log_metric("val_loss", loss)
-                foundations.log_metric("val_acc", acc)
 
         try:
             inputs, labels, data = next(self.visual_iter)
@@ -133,9 +143,9 @@ class Trainer(object):
         _, output = self.forward(inputs, labels)
         output = torch.sigmoid(output.detach().cpu())
         inputs = inputs.view((-1, ) + inputs.shape[-3:])
-        self.writer.add_images(f'validate/{self.current_epoch}_inputs.png', self.unnorm(inputs), self.current_epoch)
-        print(labels.numpy().reshape(-1))
-        print(output.numpy().reshape(-1))
+        self.writer.add_images(f'validate/{self.current_epoch}_inputs.png', self.unnorm(inputs)[:8], self.current_epoch)
+        # print(labels.numpy().reshape(-1))
+        # print(output.numpy().reshape(-1))
         # self.writer.add_scalar(f"validate/{self.current_epoch}_label", labels[0, 0], self.current_epoch)
         # self.writer.add_scalar(f'validate/{self.current_epoch}_predict', output[0, 0], self.current_epoch)
         print(f'Epoch {self.current_epoch}: val loss={loss:.4f} | val acc={acc:.4f}')
@@ -146,3 +156,6 @@ class Trainer(object):
             self.current_epoch = epoch
             self.step()
             self.validate()
+        if settings.USE_FOUNDATIONS:
+            for key, value in self.history_best:
+                foundations.log_metric(key, float(value))

@@ -30,7 +30,7 @@ class Classification_Meter:
         self.phase = phase
 
     def update(self, targets: Tensor, outputs: Tensor, loss: float):
-        predicts = torch.sigmoid(outputs).numpy().clip(1e-8, 1 - 1e-8)
+        predicts = torch.sigmoid(outputs).numpy().clip(1e-6, 1 - 1e-6)
         targets = targets.numpy()
         acc = ((predicts > 0.5) == targets).sum().item()/len(predicts)
         neg_loss = log_loss(targets[targets == 1], predicts[targets == 1], labels=[0, 1])

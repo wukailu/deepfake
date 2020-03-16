@@ -35,6 +35,8 @@ class Records:
 
 
 def train_one_epoch(epoch, model, train_dl, max_lr, optimizer, criterion, scheduler, records, batch_repeat):
+    print(np.random.randint(0, 2e9), random.randint(0, 2e9))
+
     model.train()
     train_loss = 0
     train_loss_eval = 0
@@ -47,7 +49,9 @@ def train_one_epoch(epoch, model, train_dl, max_lr, optimizer, criterion, schedu
     cnt = 0
 
     optimizer.zero_grad()
-    for step, data in enumerate(train_tk):
+    for step, (data, skip) in enumerate(train_tk):
+        if skip:
+            continue
         inputs, labels = get_input_with_label(data)
 
         model.train()
@@ -87,6 +91,7 @@ def train_one_epoch(epoch, model, train_dl, max_lr, optimizer, criterion, schedu
 
 
 def validate(model, val_dl, criterion, records):
+    seeds = [np.random.randint(0, 2e9), random.randint(0, 2e9)]
     np.random.seed(2018011328)
     random.seed(2018011328)
 
@@ -99,7 +104,9 @@ def validate(model, val_dl, criterion, records):
     all_labels = []
     all_predictions = []
 
-    for data in val_dl:
+    for data, skip in val_dl:
+        if skip:
+            continue
         inputs, labels = get_input_with_label(data)
 
         with torch.no_grad():
@@ -124,6 +131,9 @@ def validate(model, val_dl, criterion, records):
     records.val_custom_metrics.append(extra_score)
     print(f'\t val loss={records.val_losses[-1]:.4f} | val acc={records.val_accs[-1]:.4f} | '
           f'val {extra_metric.__name__}={records.val_custom_metrics[-1]:.4f}')
+
+    np.random.seed(seeds[0])
+    random.seed(seeds[1])
 
 
 def train(train_dl, val_dl, test_dl, val_dl_iter, model, optimizer, scheduler, criterion, params):

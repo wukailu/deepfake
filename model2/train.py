@@ -109,10 +109,10 @@ class Trainer(object):
             if settings.USE_FOUNDATIONS:
                 foundations.save_artifact('checkpoints/best_model.pth', key='best_model_checkpoint')
 
-                foundations.log_metric("train_loss", np.mean(self.meter_train.losses))
-                foundations.log_metric("val_loss", loss)
-                foundations.log_metric("val_dice", dices[0])
-                foundations.log_metric("val_iou", iou)
+                foundations.log_metric("train_loss", float(np.mean(self.meter_train.losses)))
+                foundations.log_metric("val_loss", float(loss))
+                foundations.log_metric("val_dice", float(dices[0]))
+                foundations.log_metric("val_iou", float(iou))
 
         try:
             inputs, labels, data = next(self.visual_iter)

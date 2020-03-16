@@ -20,10 +20,11 @@ def collate_fn(batch: list):
     try:
         ret['real'] = torch.stack(ret['real'])
         ret['fake'] = torch.stack(ret['fake'])
+        return ret, False
     except:
         ret['real'] = torch.zeros((1, 3, 224, 224))
         ret['fake'] = torch.zeros((1, 3, 224, 224))
-    return ret
+        return ret, True
 
 
 def train_data_filter(metadata_df):
@@ -35,13 +36,14 @@ def val_data_filter(metadata_df):
 
 
 class DFDCDataset(Dataset):
-    def __init__(self, metadata: DataFrame, bbox: DataFrame, params: dict, transform, data_filter):
+    def __init__(self, metadata: DataFrame, bbox: DataFrame, params: dict, transform, data_filter, diff):
         self.metadata_df = metadata
         self.real_filename = list(data_filter(metadata).index)
         self.bbox_df = bbox
         self.bbox_index_fn = set(bbox.index.get_level_values(0))
         self.transform = transform
         self.same_transform = params['same_transform']
+        self.diff = diff
 
         self.video_path = pathlib.Path(params['data_path'])
         self.cached_path = pathlib.Path(params['cache_path'])
@@ -53,53 +55,62 @@ class DFDCDataset(Dataset):
             if row['label'] == 'FAKE' and row['original'] in filename_set:
                 self.real2fakes[row['original']].append(fn)
 
+        import albumentations as aug
+        self.trans = aug.OneOf([aug.Downscale(0.5, 0.5, p=0.66),
+                                aug.JpegCompression(quality_lower=20, quality_upper=20, p=0.66),
+                                aug.Flip(p=0)])
+
     def __len__(self):
         return len(self.real_filename)
 
-    def __get_transformed_face(self, filename: str, frame: int, trans) -> (torch.Tensor, pathlib.Path):
-        cached_dir = self.cached_path / filename.split('.')[0] / str(0)
-        cached_file = cached_dir / (str(frame) + '.png')
-
-        if cached_file.is_file():
-            with open(cached_file, 'rb') as f:
+    def __get_transformed_face(self, file_path) -> (torch.Tensor, pathlib.Path):
+        if file_path.is_file():
+            with open(file_path, 'rb') as f:
                 face = Image.open(f)
                 face.load()
         else:
             raise IOError("cache not found")
 
-        # assert face.size == (224, 224)
-
         img = np.array(face)
-        face = Image.fromarray(trans(**{"image": img})["image"])
+        face = Image.fromarray(self.trans(**{"image": img})["image"])
 
         image = self.transform(face)
-        return image, cached_file
+        return image, file_path
+
+    def _get_fake(self, real_fn):
+        fake_fn = np.random.choice(self.real2fakes[real_fn])
+        fold = np.random.choice(os.listdir(self.cached_path / fake_fn.split(".")[0]))
+        file = np.random.choice(os.listdir(self.cached_path / fake_fn.split(".")[0] / fold))
+        key = (fake_fn.split(".")[0], int(fold), file)
+        diff = self.diff.at[key, "diff"]
+        if diff < 0.01:
+            raise IOError("it's not a fake")
+        return fake_fn, fold, file
 
     def __getitem__(self, idx: int):
         real_fn = self.real_filename[idx]
-        fake_fn = np.random.choice(self.real2fakes[real_fn])
 
         try:
-            files = os.listdir(self.cached_path / real_fn.split(".")[0] / str(0))
-            frame = np.random.choice(sorted([int(file.split(".")[0]) for file in files]))
-
-            temp_seed = np.random.randint(0, 2e9)
-
-            import albumentations as aug
-            trans = aug.OneOf([
-                aug.Downscale(0.5, 0.5, p=0.66),
-                aug.JpegCompression(quality_lower=20, quality_upper=20, p=0.66),
-                aug.Flip(p=0)])
-
+            for _ in range(20):
+                try:
+                    fake_fn, fold, file = self._get_fake(real_fn)
+                    break
+                except (IOError, KeyError, ValueError) as e:
+                    pass
+            real_path = self.cached_path / real_fn.split('.')[0] / fold / file
+            fake_path = self.cached_path / fake_fn.split('.')[0] / fold / file
             if self.same_transform:
+                temp_seed = np.random.randint(0, 2e9)
                 random.seed(temp_seed)
-            real_image, real_file = self.__get_transformed_face(real_fn, frame, trans)
-            if self.same_transform:
+                real_image, real_file = self.__get_transformed_face(real_path)
                 random.seed(temp_seed)
-            fake_image, fake_file = self.__get_transformed_face(fake_fn, frame, trans)
+                fake_image, fake_file = self.__get_transformed_face(fake_path)
+            else:
+                real_image, real_file = self.__get_transformed_face(real_path)
+                fake_image, fake_file = self.__get_transformed_face(fake_path)
 
             return {'real': real_image, 'fake': fake_image, 'real_file': real_file, 'fake_file': fake_file}
-        except (IOError, KeyError) as e:
+        except (IOError, KeyError, NameError) as e:
             return {'real': None, 'fake': None, 'real_file': None, 'fake_file': None}
 
 
@@ -174,24 +185,25 @@ def create_dataloaders(params: dict):
     train_transforms, val_transforms = get_transforms(params, image_size=224)
     metadata = pd.read_json(params['metadata_path']).T
     bbox = pd.read_csv(params['bbox_path'], index_col=[0, 1, 2])
+    diff = pd.read_csv(params["diff_path"], index_col=[0])
     loader = 8
     # train_dl = _create_dataloader(metadata[metadata['split_kailu'] == 'validation'], bbox, params, train_transforms,
     #                             train_data_filter, shuffle=True, num_workers=loader, repeate=5)
     train_dl = _create_dataloader(metadata[metadata['split_kailu'] == 'train'], bbox, params, train_transforms,
-                                  train_data_filter, shuffle=True, num_workers=loader)
+                                  train_data_filter, diff, shuffle=True, num_workers=loader)
     val_dl = _create_dataloader(metadata[metadata['split_kailu'] == 'validation'], bbox, params, val_transforms,
-                                train_data_filter, shuffle=False, num_workers=loader, repeate=2)
+                                train_data_filter, diff, shuffle=False, num_workers=loader, repeate=1)
     test_dl = _create_dataloader(metadata[metadata['split_kailu'] == 'test'], bbox, params, val_transforms,
-                                 val_data_filter, shuffle=False, num_workers=loader)
+                                 val_data_filter, diff, shuffle=False, num_workers=loader)
 
     return train_dl, val_dl, test_dl, iter(val_dl)
 
 
-def _create_dataloader(metadata: DataFrame, bbox: DataFrame, params: dict, transform, data_filter,
+def _create_dataloader(metadata: DataFrame, bbox: DataFrame, params: dict, transform, data_filter, diff,
                        num_workers=4, shuffle=True, repeate=1):
     assert len(metadata) != 0, f'metadata are empty'
 
-    ds = DFDCDataset(metadata=metadata, bbox=bbox, params=params, transform=transform, data_filter=data_filter)
+    ds = DFDCDataset(metadata=metadata, bbox=bbox, params=params, transform=transform, data_filter=data_filter, diff=diff)
     if repeate > 1:
         ds = torch.utils.data.ConcatDataset([ds]*repeate)
     dl = DataLoader(ds, batch_size=params['batch_size'], num_workers=num_workers, shuffle=shuffle,

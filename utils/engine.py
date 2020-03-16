@@ -101,9 +101,10 @@ class FastDataset(Dataset):
 
 
 class Cache_loader:
-    def __init__(self, video_paths, cache_folder=""):
+    def __init__(self, video_paths, cache_folder="", path_suffix=""):
         from settings import face_cache_path
         self.paths = video_paths
+        self.path_suffix = path_suffix
         if cache_folder == "":
             self.cache_folder = face_cache_path
         else:
@@ -120,7 +121,7 @@ class Cache_loader:
 
     def extract_video(self, video_path):
         filename = video_path.split('/')[-1].split('.')[0]
-        cache_path = os.path.join(self.cache_folder, filename)
+        cache_path = os.path.join(self.cache_folder, filename, self.path_suffix)
         if os.path.exists(cache_path):
             ret = {}
             for root, subdirs, files in os.walk(cache_path):
