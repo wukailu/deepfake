@@ -12,6 +12,7 @@ test_face_cache_path = BASE + "tests/"
 img_cache_path = BASE + "shots/"
 video_cache_path = BASE + "video/"
 video_cache_path2 = BASE + "video2/"
+continue_cache_path = BASE + "continue/"
 USE_FOUNDATIONS = True
 un_normal_list = []
 test_model_path = '~/deepfake/model1/result/checkpoints/best_model.pth'

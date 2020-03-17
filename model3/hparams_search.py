@@ -6,17 +6,18 @@ NUM_JOBS = 50
 
 
 def generate_params():
+    # we should increase batchsize
     params = {'total_batch_size': int(np.random.choice([256])),  # there's some bugs with DataParallel training
-              'batch_repeat': int(np.random.choice([1, 2])),  # Due to the problem with batch norm, batch_repeat>1 will be less efficient
+              'batch_repeat': int(np.random.choice([1, 2, 4])),  # Due to the problem with batch norm, batch_repeat>1 will be less efficient
               'num_epochs': int(np.random.choice([40])),
               'weight_decay': float(np.random.choice([0.00001])),  # 0, 0.00001, 0.0001
-              'max_lr': float(np.random.choice([0.01, 0.003, 0.001, 0.0003, 0.0001])),  # 0.0003, 0.0001, 0.00003
+              'max_lr': float(np.random.choice([0.0001, 0.0005, 0.00003, 0.00001])),  # 0.0003, 0.0001, 0.00003
               'use_lr_scheduler': int(np.random.choice([0])),  # 0, 1
               'clip_gradient': int(np.random.choice([0, 20])),  # 20
               'same_transform': int(np.random.choice([0])),
 
               'backbone': int(np.random.choice([1])),
-              'num_segments': int(np.random.choice([2, 4])),   # 8 frames
+              'num_segments': int(np.random.choice([4, 8])),   # 8 frames
               'shift_div': int(np.random.choice([8])),  # shift 1/8 of the channel
 
               'dropout': float(np.random.choice([0.3, 0.5, 0.7])),  # 0.3 0.5 0.7 0.9

@@ -157,5 +157,5 @@ class Trainer(object):
             self.step()
             self.validate()
         if settings.USE_FOUNDATIONS:
-            for key, value in self.history_best:
+            for key, value in self.history_best.items():
                 foundations.log_metric(key, float(value))

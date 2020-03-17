@@ -21,7 +21,7 @@ def get_trainable_params(model):
     params_to_update = []
     for name, param in model.named_parameters():
         if param.requires_grad:
-            print("\t", repr(name))
+            # print("\t", repr(name))
             params_to_update.append(param)
             
     return params_to_update
@@ -128,7 +128,7 @@ def create_model(use_hidden_layer, dropout, backbone, params):
         model.fc = get_classifier(model.fc.in_features, use_hidden_layer, dropout)
         model, params = freeze_resnet(model, params)
 
-    print(model)
+    # print(model)
     model = model.cuda()
     return model, params
 

@@ -12,7 +12,7 @@ good_params = [
     {'batch_size': 96, 'batch_repeat': 1, 'n_epochs': 30, 'weight_decay': 1e-05, 'dropout': 0.5, 'RandomScale': 1, 'RandomRotate': 1, 'ColorJitter': 0, 'RandomPerspective': 0, 'RandomErasing': 1, 'RandomCrop': 0, 'freeze': 1, 'max_lr': 0.001, 'use_lr_scheduler': 0, 'scheduler_gamma': 0.9, 'use_hidden_layer': 0, 'backbone': 7, 'same_transform': 0, 'val_rate': 1, 'data_path': '/data1/data/deepfake/dfdc_train', 'metadata_path': 0, 'bbox_path': '/data/deepfake/bbox_real.csv', 'cache_path': '/data/deepfake/faces/', 'seed': 365312138}
 ]
 
-NUM_JOBS = 1
+NUM_JOBS = 50
 
 
 def generate_params():
@@ -20,8 +20,8 @@ def generate_params():
     # overfit return {'batch_size': 64, 'n_epochs': 40, 'weight_decay': 1e-05, 'dropout': 0.0, 'RandomAffine': 2, 'ColorJitter': 0, 'RandomPerspective': 1, 'RandomErasing': 0, 'RandomCrop': 0, 'freeze': 0, 'max_lr': 0.0003, 'use_lr_scheduler': 0, 'scheduler_gamma': 0.9, 'use_hidden_layer': 1, 'backbone': 7, 'same_transform': 1, 'val_rate': 1, 'data_path': '/data1/data/deepfake/dfdc_train', 'metadata_path': 0, 'bbox_path': '/data/deepfake/bbox_real.csv', 'cache_path': '/data/deepfake/faces/', 'seed': 254089471}
 
     params = {'batch_size': int(choice([32])),
-              'batch_repeat': int(choice([1, 2, 3])),
-              'n_epochs': int(choice([30])),
+              'batch_repeat': int(choice([3, 6, 9])),
+              'n_epochs': int(choice([40])),
               'weight_decay': float(choice([0.00001])),  # 0, 0.00001, 0.0001
               'dropout': float(choice([0.25, 0.5, 0.75])),  # 0 0.3 [0.5] 0.7 0.9 (0)
 
@@ -33,12 +33,12 @@ def generate_params():
               'RandomCrop': int(choice([0, 1, 2])),  # (0)
               'freeze': int(choice([0, 1])),
 
-              'max_lr': float(choice([0.002, 0.0015, 0.001, 0.00075])),
+              'max_lr': float(choice([0.005, 0.002, 0.0015, 0.001])),
               'use_lr_scheduler': int(choice([0])),  # 0, 1 (2)
               'scheduler_gamma': float(choice([0.9])),  # 0.96, 0.95, 0.94 (0.96)
               'use_hidden_layer': int(choice([0])),  # 0, (1)
               'backbone': int(choice([7])),  # 1, 2, 3, 4, 5, 6, 7, 8, 9
-              'same_transform': int(choice([0])),  # TODO: Why
+              'same_transform': int(choice([0, 1])),  # TODO: Why
               'val_rate': 1,
               'data_path': settings.DATA_DIR,
               'metadata_path': int(choice(list(range(len(settings.meta_data_path))))),  # 0, 1, 2

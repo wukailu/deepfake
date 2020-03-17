@@ -81,22 +81,22 @@ class DFDCDataset(Dataset):
         fake_fn = np.random.choice(self.real2fakes[real_fn])
         fold = np.random.choice(os.listdir(self.cached_path / fake_fn.split(".")[0]))
         file = np.random.choice(os.listdir(self.cached_path / fake_fn.split(".")[0] / fold))
-        key = (fake_fn.split(".")[0], int(fold), file)
+        key = str((fake_fn.split(".")[0], int(fold), file))
         diff = self.diff.at[key, "diff"]
         if diff < 0.01:
-            raise IOError("it's not a fake")
+            raise ValueError("it's not a fake")
         return fake_fn, fold, file
 
     def __getitem__(self, idx: int):
         real_fn = self.real_filename[idx]
-
+        for _ in range(20):
+            try:
+                fake_fn, fold, file = self._get_fake(real_fn)
+                break
+            except (KeyError, ValueError, FileNotFoundError) as e:
+                pass
         try:
-            for _ in range(20):
-                try:
-                    fake_fn, fold, file = self._get_fake(real_fn)
-                    break
-                except (IOError, KeyError, ValueError) as e:
-                    pass
+
             real_path = self.cached_path / real_fn.split('.')[0] / fold / file
             fake_path = self.cached_path / fake_fn.split('.')[0] / fold / file
             if self.same_transform:
@@ -186,6 +186,7 @@ def create_dataloaders(params: dict):
     metadata = pd.read_json(params['metadata_path']).T
     bbox = pd.read_csv(params['bbox_path'], index_col=[0, 1, 2])
     diff = pd.read_csv(params["diff_path"], index_col=[0])
+
     loader = 8
     # train_dl = _create_dataloader(metadata[metadata['split_kailu'] == 'validation'], bbox, params, train_transforms,
     #                             train_data_filter, shuffle=True, num_workers=loader, repeate=5)

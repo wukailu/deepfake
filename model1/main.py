@@ -32,10 +32,9 @@ else:
     params['seed'] = seed
 
 print(params)
-# params = {'batch_size': 64, 'n_epochs': 100, 'weight_decay': 0.0001, 'dropout': 0.7, 'augment_level': 3, 'max_lr': 0.0003, 'use_lr_scheduler': 0, 'scheduler_gamma': 0.95, 'use_hidden_layer': 0, 'backbone': 'resnet34', 'val_rate': 1, 'data_path': '/data1/data/deepfake/dfdc_train', 'metadata_path': '/data1/data/deepfake/dfdc_train/metadata_kailu.json', 'bbox_path': '/data1/data/deepfake/bbox_real.csv', 'cache_path': '/data1/data/deepfake/face/', 'seed': 1378744497}
 
 params['metadata_path'] = settings.meta_data_path[params['metadata_path']]
-params['n_epochs'] *= params['batch_repeat']
+# params['n_epochs'] *= params['batch_repeat']
 
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False

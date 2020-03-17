@@ -52,27 +52,28 @@ def train_one_epoch(epoch, model, train_dl, max_lr, optimizer, criterion, schedu
     for step, (data, skip) in enumerate(train_tk):
         if skip:
             continue
+        cnt = cnt + 1
         inputs, labels = get_input_with_label(data)
-
         model.train()
-
         outputs = model(inputs)
-        predicted = torch.sigmoid(outputs.data) > 0.5
 
         total += labels.size(0)
+        predicted = torch.sigmoid(outputs.data) > 0.5
         correct_count += (predicted == labels).sum().item()
         loss = criterion(outputs, labels) / batch_repeat
 
-        with amp.scale_loss(loss, optimizer) as scaled_loss:
-            scaled_loss.backward()
-
-        if (cnt+1) % batch_repeat == 0:
+        if cnt % batch_repeat == 0:
+            with amp.scale_loss(loss, optimizer) as scaled_loss:
+                scaled_loss.backward()
             optimizer.step()
             optimizer.zero_grad()
+        else:
+            with amp.scale_loss(loss, optimizer, delay_unscale=True) as scaled_loss:
+                scaled_loss.backward()
 
         train_loss += loss.item() * batch_repeat
         train_tk.set_postfix(loss=train_loss / (step + 1), acc=correct_count / total)
-        cnt = cnt+1
+
 
     if scheduler is not None:
         records.lrs += scheduler.get_lr()
