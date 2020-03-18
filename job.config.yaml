@@ -1,6 +1,6 @@
 # Project config #
 #project_name: 'DFDC_Image_drop_same'
-project_name: 'DFDC_TSM_video'
+project_name: 'DFDC_TSM_video_limited_time_4h'
 log_level: INFO
 
 # Worker config #

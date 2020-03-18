@@ -8,6 +8,7 @@ import os
 from torch.utils.tensorboard import SummaryWriter
 
 from model3.utils import Classification_Meter, Unnormalize
+from model3.sync_batchnorm import convert_model
 
 import foundations
 import settings
@@ -23,7 +24,7 @@ class Trainer(object):
         self.visual_iter = iter(val_dl)
         self.unnorm = Unnormalize(model.input_mean, model.input_std)
 
-        # self.model = torch.nn.DataParallel(model).cuda()
+        # self.model = torch.nn.DataParallel(convert_model(model)).cuda()
         # serious bugs due to DataParallel, may caused by BN and apex
         self.model = model
         self.optimizer = optimizer
