@@ -83,7 +83,7 @@ class DFDCDataset(Dataset):
         file = np.random.choice(os.listdir(self.cached_path / fake_fn.split(".")[0] / fold))
         key = str((fake_fn.split(".")[0], int(fold), file))
         diff = self.diff.at[key, "diff"]
-        if diff < 0.01:
+        if diff < 0.0:
             raise ValueError("it's not a fake")
         return fake_fn, fold, file
 

@@ -12,7 +12,7 @@ good_params = [
     {'batch_size': 96, 'batch_repeat': 1, 'n_epochs': 30, 'weight_decay': 1e-05, 'dropout': 0.5, 'RandomScale': 1, 'RandomRotate': 1, 'ColorJitter': 0, 'RandomPerspective': 0, 'RandomErasing': 1, 'RandomCrop': 0, 'freeze': 1, 'max_lr': 0.001, 'use_lr_scheduler': 0, 'scheduler_gamma': 0.9, 'use_hidden_layer': 0, 'backbone': 7, 'same_transform': 0, 'val_rate': 1, 'data_path': '/data1/data/deepfake/dfdc_train', 'metadata_path': 0, 'bbox_path': '/data/deepfake/bbox_real.csv', 'cache_path': '/data/deepfake/faces/', 'seed': 365312138}
 ]
 
-NUM_JOBS = 50
+NUM_JOBS = 21
 
 
 def generate_params():
@@ -33,7 +33,7 @@ def generate_params():
               'RandomCrop': int(choice([0, 1, 2])),  # (0)
               'freeze': int(choice([0, 1])),
 
-              'max_lr': float(choice([0.005, 0.002, 0.0015, 0.001])),
+              'max_lr': float(choice([0.005, 0.002])),
               'use_lr_scheduler': int(choice([0])),  # 0, 1 (2)
               'scheduler_gamma': float(choice([0.9])),  # 0.96, 0.95, 0.94 (0.96)
               'use_hidden_layer': int(choice([0])),  # 0, (1)

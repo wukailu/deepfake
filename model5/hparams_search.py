@@ -2,18 +2,13 @@ import foundations
 import numpy as np
 import settings
 
-good_params = [
-    {'total_batch_size': 256, 'batch_repeat': 1, 'num_epochs': 160, 'weight_decay': 0.0001, 'max_lr': 0.0001, 'use_lr_scheduler': 0, 'clip_gradient': 0, 'same_transform': 0, 'label_smoothing': 0.15, 'backbone': 1, 'num_segments': 4, 'shift_div': 8, 'dropout': 0.5, 'RandomErasing': 0, 'RandomCrop': 0, 'data_path': '/data1/data/deepfake/dfdc_train', 'metadata_path': 0, 'cache_path': '/data/deepfake/video/', 'seed': 893248973},
-    {'total_batch_size': 256, 'batch_repeat': 1, 'num_epochs': 160, 'weight_decay': 0.0005, 'max_lr': 1e-05, 'use_lr_scheduler': 0, 'clip_gradient': 10, 'same_transform': 0, 'label_smoothing': 0.05, 'backbone': 1, 'num_segments': 4, 'shift_div': 8, 'dropout': 0.3, 'RandomErasing': 4, 'RandomCrop': 2, 'data_path': '/data1/data/deepfake/dfdc_train', 'metadata_path': 0, 'cache_path': '/data/deepfake/video/', 'seed': 230503051},
-]
-NUM_JOBS = 7
+NUM_JOBS = 1
 
 
 def generate_params():
     # we should increase batchsize
-    # return np.random.choice(good_params)
-    # one run takes about 4 hour on V100
     params = {'total_batch_size': int(np.random.choice([256])),  # there's some bugs with DataParallel training
+              'gpus': int(np.random.choice([7])),
               'batch_repeat': int(np.random.choice([1])),  # Due to the problem with batch norm, batch_repeat>1 will be less efficient
               'num_epochs': int(np.random.choice([160])),
               'weight_decay': float(np.random.choice([0, 0.0001, 0.0005])),  # 0, 0.00001, 0.0001
@@ -34,7 +29,7 @@ def generate_params():
 
               'data_path': settings.DATA_DIR,
               'metadata_path': int(np.random.choice(list(range(len(settings.meta_data_path))))),
-              'cache_path': settings.video_cache_path2,
+              'cache_path': settings.continue_cache_path,
               }
 
     return params
@@ -52,5 +47,6 @@ if __name__ == "__main__":
         seed = np.random.randint(2e9)
         hyper_params['seed'] = int(seed)
         print(hyper_params)
-        foundations.submit(scheduler_config='scheduler', job_directory='..', command='model3/main.py',
-                           params=hyper_params, stream_job_logs=False, num_gpus=1)
+        foundations.submit(scheduler_config='scheduler', job_directory='..',
+                           command=f'-m torch.distributed.launch --nproc_per_node={hyper_params["gpus"]} model5/main.py',
+                           params=hyper_params, stream_job_logs=False, num_gpus=hyper_params["gpus"])

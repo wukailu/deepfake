@@ -1,6 +1,6 @@
 # Project config #
-#project_name: 'DFDC_Image_drop_same'
-project_name: 'DFDC_TSM_video_limited_time_4h'
+#project_name: 'DFDC_Image_model4_all_singleface'
+project_name: 'Model1'
 log_level: INFO
 
 # Worker config #
@@ -23,3 +23,5 @@ worker:
     /home/kailu/.cache/torch/checkpoints:
       bind: /root/.cache/torch/checkpoints
       mode: rw
+
+  network_mode: host

@@ -2,13 +2,11 @@ import torch
 from tqdm import tqdm
 from apex import amp
 import random
-from apex.parallel import DistributedDataParallel as DDP
 import numpy as np
 import os
 from torch.utils.tensorboard import SummaryWriter
 
-from model3.utils import Classification_Meter, Unnormalize
-
+from model5.utils import DistributedClassificationMeter, Unnormalize
 import foundations
 import settings
 
@@ -16,10 +14,14 @@ import settings
 class Trainer(object):
     '''This class takes care of training and validation of our model'''
 
-    def __init__(self, train_dl, val_dl, test_dl, model: torch.nn.Module, optimizer, scheduler, criterion, params):
+    def __init__(self, train_dl, val_dl, test_dl, train_sampler, val_sampler, model: torch.nn.Module, optimizer, scheduler, criterion, params, rank):
         self.train_dl = train_dl
         self.val_dl = val_dl
         self.test_dl = test_dl
+        self.train_sampler = train_sampler
+        self.val_sampler = val_sampler
+        self.rank = rank
+        self.total_gpu = params["gpus"]
         self.visual_iter = iter(val_dl)
         self.unnorm = Unnormalize(model.input_mean, model.input_std)
 
@@ -34,13 +36,16 @@ class Trainer(object):
         self.criterion = criterion
         self.batch_repeat = params["batch_repeat"]
 
-        os.makedirs('checkpoints', exist_ok=True)
-        os.makedirs('tensorboard', exist_ok=True)
-        if settings.USE_FOUNDATIONS:
-            foundations.set_tensorboard_logdir('tensorboard')
-        self.writer = SummaryWriter("tensorboard")
-        self.meter_train = Classification_Meter(self.writer, 'train', 0)
-        self.meter_val = Classification_Meter(self.writer, 'val', 0)
+        if rank == 0:
+            os.makedirs('checkpoints', exist_ok=True)
+            os.makedirs('tensorboard', exist_ok=True)
+            if settings.USE_FOUNDATIONS:
+                foundations.set_tensorboard_logdir('tensorboard')
+            self.writer = SummaryWriter("tensorboard")
+        else:
+            self.writer = None
+        self.meter_train = None
+        self.meter_val = None
         self.current_epoch = 0
         self.best_metric = 1e9
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -55,14 +60,14 @@ class Trainer(object):
         random.seed(2018011328)
         self.phase = 'test'
         self.model.eval()
-        self.meter_val = Classification_Meter(self.writer, self.phase, self.current_epoch)
+        self.meter_val = DistributedClassificationMeter(self.writer, self.phase, self.current_epoch, self.total_gpu, self.criterion)
 
     def train(self):
         np.random.seed(self.seeds[0])
         random.seed(self.seeds[1])
         self.phase = 'train'
         self.model.train()
-        self.meter_train = Classification_Meter(self.writer, self.phase, self.current_epoch)
+        self.meter_train = DistributedClassificationMeter(self.writer, self.phase, self.current_epoch, self.total_gpu, self.criterion)
 
     def forward(self, images, targets) -> (torch.Tensor, torch.Tensor):
         images = images.cuda()
@@ -81,7 +86,10 @@ class Trainer(object):
     def step(self):
         self.train()
         print(np.random.randint(0, 2e9))
-        train_tk = tqdm(self.train_dl, total=int(len(self.train_dl)), desc='Train Epoch')
+        if self.rank == 0:
+            train_tk = tqdm(self.train_dl, total=int(len(self.train_dl)), desc='Train Epoch')
+        else:
+            train_tk = self.train_dl
         cnt = 0
         self.optimizer.zero_grad()
         for inputs, labels, data in train_tk:
@@ -99,9 +107,8 @@ class Trainer(object):
                 else:
                     with amp.scale_loss(loss, self.optimizer, delay_unscale=True) as scaled_loss:
                         scaled_loss.backward()
-
-            self.optimizer.zero_grad()
-            self.meter_train.update(labels, outputs.detach().cpu(), loss.item() * self.batch_repeat)
+            with torch.no_grad():
+                self.meter_train.update(labels, outputs.detach().cpu(), loss.detach().cpu() * self.batch_repeat)
 
         if self.scheduler is not None:
             self.writer.add_scalar("lr", np.mean(self.scheduler.get_lr()), self.current_epoch)
@@ -110,17 +117,21 @@ class Trainer(object):
             self.writer.add_scalar("lr", self.lr, self.current_epoch)
 
         info = self.meter_train.log_metric()
-        print(f'Epoch {self.current_epoch}: train loss={info["loss"]:.4f} | train acc={info["acc"]:.4f}')
+        if self.rank == 0:
+            print(f'Epoch {self.current_epoch}: train loss={info["loss"]:.4f} | train acc={info["acc"]:.4f}')
 
     def validate(self):
         self.eval()
 
         for inputs, labels, data in self.val_dl:
             loss, output = self.forward(inputs, labels)
-            self.meter_val.update(labels, output.detach().cpu(), loss.item())
+            self.meter_val.update(labels, output.detach().cpu(), loss)
 
         info = self.meter_val.log_metric()
         selection_metric = info["acc"]  # not using loss but pos loss
+
+        if self.rank != 0:
+            return
 
         if selection_metric <= self.best_metric:
             self.best_metric = selection_metric
@@ -151,8 +162,10 @@ class Trainer(object):
         self.current_epoch = 0
         for epoch in range(self.num_epochs):
             self.current_epoch = epoch
+            self.train_sampler.set_epoch(epoch)
             self.step()
+            self.val_sampler.set_epoch(epoch)
             self.validate()
-        if settings.USE_FOUNDATIONS:
+        if settings.USE_FOUNDATIONS and self.rank == 0:
             for key, value in self.history_best.items():
                 foundations.log_metric(key, float(value))

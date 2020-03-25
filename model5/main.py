@@ -7,27 +7,18 @@ import apex
 from apex import amp
 import apex.optimizers as apex_optim
 from apex.parallel import DistributedDataParallel as DDP
-# from torch.nn.parallel import DistributedDataParallel as DDP
 
 import random
-
 import sys
 
 sys.path.append('/job/job_source/')
 import settings
-from model4.data_loader import create_dataloaders
-from model4.model import get_trainable_params, create_model, print_model_params
-from model4.train import train
-
-###
-# python -m torch.distributed.launch --nproc_per_node=8 ../main.py
-# nvidia-smi         发现内存泄露问题，即没有进程时，内存被占用
-# kill $(ps aux | grep "main.py" | grep -v grep | awk '{print $2}')
-###
+from model5.data_loader import create_dataloaders
+from model5.model import create_model, print_model_params
+from model5.train import Trainer
 
 if settings.USE_FOUNDATIONS:
     import foundations
-
     params = foundations.load_parameters()
     # Fix random seed
     torch.manual_seed(params['seed'])
@@ -51,58 +42,52 @@ device = torch.device("cuda", rank)
 
 if rank == 0:
     print(params)
-
 params['metadata_path'] = settings.meta_data_path[params['metadata_path']]
-# params['n_epochs'] *= params['batch_repeat']
+params['batch_size'] = params['total_batch_size'] // params['num_segments']
+params['num_epochs'] = params['num_epochs'] // params['num_segments']
 
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
 if rank == 0:
     print('Creating loss function')
-
 # Loss function
 criterion = nn.BCEWithLogitsLoss()
 
 if rank == 0:
     print('Creating model')
-
 # Create model, freeze layers and change last layer
-model, params = create_model(bool(params['use_hidden_layer']), params['dropout'], params['backbone'], params)
-_ = print_model_params(model)
+model, params = create_model(params)
 
 model = apex.parallel.convert_syncbn_model(model)
 model.cuda()
-params_to_update = get_trainable_params(model)
+params_to_update = model.get_optim_policies()
 
 if rank == 0:
     print('Creating optimizer')
 # Create optimizer and learning rate schedules
-# if settings.USE_FOUNDATIONS:
-#     optimizer = optim.Adam(params_to_update, lr=params['max_lr'], weight_decay=params['weight_decay'])
-# else:
+if params['use_lr_scheduler'] == 1:
+    params['max_lr'] = params['max_lr'] * 10
 optimizer = apex_optim.FusedAdam(params_to_update, lr=params['max_lr'], weight_decay=params['weight_decay'])
 model, optimizer = amp.initialize(model, optimizer, opt_level='O1', verbosity=0)
-
-# if not settings.USE_FOUNDATIONS:
 model = DDP(model, delay_allreduce=True)
-# model = DDP(model)
 
 # Learning rate scheme
-scheduler = None
+if bool(params['use_lr_scheduler']) == 1:
+    scheduler = lr_scheduler.StepLR(optimizer, step_size=params["n_epochs"] // 3, gamma=0.1)
+else:
+    scheduler = None
 
 if rank == 0:
     print('Creating datasets')
 # Get dataloaders
-train_dl, val_dl, test_dl, val_dl_iter, train_sampler, val_sampler = create_dataloaders(params)
-# pdb.set_trace()
+train_dl, val_dl, test_dl, train_sampler, val_sampler = create_dataloaders(params, mean=model.input_mean, std=model.input_std)
 
 if settings.USE_FOUNDATIONS and rank == 0:
     foundations.log_params(params)
-
 if rank == 0:
     print(params)
     print('Training start..')
-# Train
-train(train_dl, val_dl, test_dl, val_dl_iter, model, optimizer, scheduler,
-      criterion, params, train_sampler, val_sampler, rank)
+
+trainer = Trainer(train_dl, val_dl, test_dl, train_sampler, val_sampler, model, optimizer, scheduler, criterion, params, rank)
+trainer.start()

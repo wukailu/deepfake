@@ -129,6 +129,6 @@ def create_model(use_hidden_layer, dropout, backbone, params):
         model, params = freeze_resnet(model, params)
 
     # print(model)
-    model = model.cuda()
+    # model = model.cuda()
     return model, params
 

@@ -56,6 +56,7 @@ if params['use_lr_scheduler'] == 3:
 
 optimizer = optim.Adam(params_to_update, lr=params['max_lr'], weight_decay=params['weight_decay'])
 model, optimizer = amp.initialize(model, optimizer, opt_level='O1', verbosity=0)
+model = model.cuda()
 
 # Learning rate scheme
 if params['use_lr_scheduler'] == 0:

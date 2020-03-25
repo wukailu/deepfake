@@ -7,6 +7,7 @@ from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
 from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
 import random
 import os
 import albumentations as aug
@@ -172,14 +173,14 @@ def create_dataloaders(params: dict, mean=(0.485, 0.456, 0.406), std=(0.229, 0.2
     train_transforms, val_transforms = get_transforms(params, image_size, mean, std)
     metadata = pd.read_json(params['metadata_path']).T
     loader = 8
-    train_dl = _create_dataloader(metadata[metadata['split_kailu'] == 'train'], params, train_transforms,
+    train_dl, sampler = _create_dataloader(metadata[metadata['split_kailu'] == 'train'], params, train_transforms,
                                   train_data_filter, shuffle=True, num_workers=loader)
-    val_dl = _create_dataloader(metadata[metadata['split_kailu'] == 'validation'], params, val_transforms,
+    val_dl, val_sampler = _create_dataloader(metadata[metadata['split_kailu'] == 'validation'], params, val_transforms,
                                 train_data_filter, shuffle=False, num_workers=loader)
-    test_dl = _create_dataloader(metadata[metadata['split_kailu'] == 'test'], params, val_transforms,
+    test_dl, _ = _create_dataloader(metadata[metadata['split_kailu'] == 'test'], params, val_transforms,
                                  val_data_filter, shuffle=False, num_workers=loader)
 
-    return train_dl, val_dl, test_dl
+    return train_dl, val_dl, test_dl, sampler, val_sampler
 
 
 def _create_dataloader(metadata: DataFrame, params: dict, transform, data_filter,
@@ -190,8 +191,10 @@ def _create_dataloader(metadata: DataFrame, params: dict, transform, data_filter
                           frame_num=params["num_segments"])
     if repeate > 1:
         ds = torch.utils.data.ConcatDataset([ds] * repeate)
+
+    sampler = DistributedSampler(ds)
     dl = DataLoader(ds, batch_size=params['batch_size'], num_workers=num_workers, shuffle=shuffle,
                     collate_fn=collate_fn, drop_last=True)
 
     print(f"data: {len(ds)}")
-    return dl
+    return dl, sampler

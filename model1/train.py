@@ -159,8 +159,7 @@ def train(train_dl, val_dl, test_dl, val_dl_iter, model, optimizer, scheduler, c
                 best_metric = selection_metric
                 print(
                     f'>>> Saving best model metric={selection_metric:.4f} compared to previous best {best_metric:.4f}')
-                checkpoint = {'model': model,
-                              'optimizer': optimizer.state_dict()}
+                checkpoint = {'model': model}
 
                 torch.save(checkpoint, 'checkpoints/best_model.pth')
                 if settings.USE_FOUNDATIONS:

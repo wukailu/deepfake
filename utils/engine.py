@@ -12,7 +12,7 @@ from face_extract import FaceExtractor
 from blazeface import BlazeFace
 import os
 import torch
-from torchvision.transforms import Normalize, RandomHorizontalFlip, ToTensor, Compose
+from torchvision.transforms import Normalize, RandomHorizontalFlip, ToTensor, Compose, Resize
 import matplotlib.pyplot as plt
 from collections import namedtuple
 
@@ -67,37 +67,46 @@ class FullVideoReader:
 
 
 class VideoDataset(Dataset):
-    def __init__(self, video_paths, sample_rate, video_reader):
+    def __init__(self, video_paths, sample_rate, video_reader, new_length=1, with_id = False):
         self.paths = video_paths
         self.sample_rate = sample_rate
         self.video_reader = video_reader
+        self.new_length = new_length
+        self.with_id = with_id
 
     def __len__(self):
         return len(self.paths)
 
     def __getitem__(self, idx: int):
         frames = self.video_reader.extract_video(self.paths[idx])
-        if len(frames) == 0:
+        if len(frames) == 0 and not self.with_id:
             return np.array([])
-        samples = np.linspace(0, len(frames) - 1, self.sample_rate).round().astype(int)
-        return frames[samples]
+        elif len(frames) == 0 and self.with_id:
+            return np.array([]), []
+        samples = np.linspace(0, len(frames) - self.new_length, self.sample_rate).round().astype(int)
+        samples = np.array(sorted(np.concatenate([samples+i for i in range(self.new_length)])))
+        if self.with_id:
+            return frames[samples], samples
+        else:
+            return frames[samples]
 
 
 class FastDataset(Dataset):
-    def __init__(self, video_paths, sample_rate, verbose=False):
+    def __init__(self, video_paths, sample_rate, verbose=False, new_length=1):
         self.paths = video_paths
         self.sample_rate = sample_rate
         self.reader = VideoReader(verbose=verbose)
+        self.new_length = new_length
 
     def __len__(self):
         return len(self.paths)
 
     def __getitem__(self, idx: int):
-        ret = self.reader.read_frames(self.paths[idx], self.sample_rate)
+        ret = self.reader.read_frames(self.paths[idx], self.sample_rate, new_length=self.new_length)
         if ret is None:
-            return None
+            return None, None
         my_frames, my_idxs = ret
-        return my_frames
+        return my_frames, np.array(my_idxs)
 
 
 class Cache_loader:
@@ -233,7 +242,8 @@ class MTCNN_extractor(Face_extractor):
                 clean_bboxes.append([])
                 clean_probs.append([])
 
-        bsize = sorted([max(box[2] - box[0], box[3] - box[1]) * self.scale for boxes in clean_bboxes for box in boxes * down_sample])
+        bsize = sorted([max(box[2] - box[0], box[3] - box[1]) * self.scale for boxes in clean_bboxes for box in
+                        boxes * down_sample])
         if len(bsize) > 0:
             bsize = int(bsize[-len(bsize) // 4])  # -1//4 = -1
 
@@ -310,9 +320,10 @@ class BlazeFace_extractor(Face_extractor):
 
 
 class Inference_model:
-    def __init__(self):
-        self.pre_mean, self.pre_std = [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
-        self.transform = Compose([ToTensor(), Normalize(self.pre_mean, self.pre_std)])
+    def __init__(self, batch_size=32, mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)):
+        self.pre_mean, self.pre_std = mean, std
+        self.transform = Compose([Resize(224), ToTensor(), Normalize(self.pre_mean, self.pre_std)])
+        self.batch_size = 32
         pass
 
     def solve(self, frames: list) -> float:
@@ -343,6 +354,12 @@ class Inference_model:
     def test(self, shape=(10, 1920, 1080, 3)):
         return self.solve(np.rand(shape))
 
+    def predict_all(self, batch) -> np.ndarray:
+        ret = []
+        for start in range(0, len(batch), self.batch_size):
+            ret.extend(self.predict_batch(batch[start:start + self.batch_size]))
+        return np.array(ret)
+
 
 class FaceInferenceModel(Inference_model):
     def __init__(self, face_extractor=None, batch_size=32):
@@ -351,7 +368,6 @@ class FaceInferenceModel(Inference_model):
         self.batch_size = batch_size
 
     def _tta(self, pil_img):
-        assert pil_img.size == (224, 224)
         return [pil_img, RandomHorizontalFlip(p=1)(pil_img)]
 
     def solve(self, frames: list) -> float:
@@ -367,7 +383,7 @@ class FaceInferenceModel(Inference_model):
             ids = []
             for face in faceInFrame:
                 ttas = []
-                pils = self._tta(Image.fromarray(face.face).resize((224, 224)))
+                pils = self._tta(Image.fromarray(face.face))
                 for pic in pils:
                     inputs.append(self.transform(pic))
                     ttas.append(cnt)
@@ -383,18 +399,94 @@ class FaceInferenceModel(Inference_model):
             [np.max([self._ensemble([output[tta] for tta in face]) for face in frame]) for frame in image_id])
         return result
 
-    def predict_all(self, batch) -> np.ndarray:
-        ret = []
-        for start in range(0, len(batch), self.batch_size):
-            ret.extend(self.predict_batch(batch[start:start + self.batch_size]))
-        return np.array(ret)
+
+def inter(box1, box2):
+    x_inter = max(min(box1[2], box2[2]) - max(box1[0], box2[0]), 0)
+    y_inter = max(min(box1[3], box2[3]) - max(box1[1], box2[1]), 0)
+    return x_inter * y_inter
 
 
-class VideoInferenceModel(Inference_model):
-    def __init__(self, batch_size=32):
+def area(box):
+    return (box[2] - box[0]) * (box[3] - box[1])
+
+
+def tracking_face(face_info_lists):
+    tracks = []
+    for face_infos in face_info_lists:
+        for face in face_infos:
+            best = -1
+            largest_inter = 0
+            for idx, track in enumerate(tracks):
+                if inter(track[-1].box, face.box) / area(track[-1].box) > largest_inter:
+                    best = idx
+                    largest_inter = inter(track[-1].box, face.box) / area(track[-1].box)
+            if best == -1:
+                tracks.append([face])
+            else:
+                tracks[best].append(face)
+
+    if len(tracks) == 0:
+        return []
+    max_len = max([len(track) for track in tracks])
+    ret = []
+    for track in tracks:
+        if len(track) > max_len * 0.3:
+            ret.append(track)
+    return sorted(ret, key=lambda x: -len(x))
+
+
+class MultiFrameModel(Inference_model):
+    def __init__(self, batch_size=4, num_frames=8):
         super().__init__()
         self.batch_size = batch_size
+        self.num_frames = num_frames
 
+    def _tta(self, pil_img):
+        return [pil_img]
+
+    def _solve_pack(self, tensor_imgs):
+        return torch.stack(tensor_imgs)
+
+    def _prepare_pack(self, track):
+        faces = sorted(track, key=lambda x: x.frame)
+        pack_num = len(track) // self.num_frames
+        ret = [[] for i in range(pack_num)]
+        cnt = 0
+        for i in faces:
+            if len(ret[cnt]) < self.num_frames:
+                ret[cnt].append(i)
+            cnt = (cnt + 1) % pack_num
+        return ret
+
+    def solve_faces(self, faces: list) -> float:
+        tracks = tracking_face(faces)
+        pieces = [self._prepare_pack(track) for track in tracks]
+
+        inputs = []
+        image_id = []
+        cnt = 0
+        for one_person in pieces:
+            ids = []
+            for face_pack in one_person:
+                pil_packs = [self._tta(Image.fromarray(imgs.face)) for imgs in face_pack]
+                ttas = []
+                for i in range(len(pil_packs[0])):
+                    pack = [ttad[i] for ttad in pil_packs]
+                    inputs.append(self._solve_pack([self.transform(img) for img in pack]))
+                    ttas.append(cnt)
+                    cnt += 1
+                if len(ttas) > 0:
+                    ids.append(ttas)
+            if len(ids) > 0:
+                image_id.append(ids)
+
+        if len(inputs) == 0 or cnt == 0:
+            return 0.5
+
+        output = self.predict_all(torch.stack(inputs))
+        result = np.max(
+            [self._ensemble([self._ensemble([output[i] for i in ttas_]) for ttas_ in ids_]) for ids_ in image_id])
+        return result
 
 
 def show(images):

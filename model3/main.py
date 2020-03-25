@@ -29,8 +29,8 @@ else:
 
     params = hparams_search.generate_params()
     params['seed'] = seed
-    print(params)
 
+print(params)
 params['metadata_path'] = settings.meta_data_path[params['metadata_path']]
 params['batch_size'] = params['total_batch_size'] // params['num_segments']
 params['num_epochs'] = params['num_epochs'] // params['num_segments']

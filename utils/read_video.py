@@ -19,7 +19,7 @@ class VideoReader:
         self.verbose = verbose
         self.insets = insets
 
-    def read_frames(self, path, num_frames, jitter=0, seed=None):
+    def read_frames(self, path, num_frames, jitter=0, seed=None, new_length=1):
         """Reads frames that are always evenly spaced throughout the video.
 
         Arguments:
@@ -30,6 +30,7 @@ class VideoReader:
                 this is useful so we don't always land on even or odd frames
             seed: random seed for jittering; if you set this to a fixed value,
                 you probably want to set it only on the first video 
+            new_length: number of continues frames sampled
         """
         assert num_frames > 0
 
@@ -39,7 +40,8 @@ class VideoReader:
         if frame_count <= 0:
             return None
 
-        frame_idxs = np.linspace(0, frame_count - 1, num_frames, endpoint=True, dtype=np.int)
+        frame_idxs = np.linspace(0, frame_count - new_length, num_frames, endpoint=True, dtype=np.int)
+        frame_idxs = np.array(sorted(np.concatenate([frame_idxs+i for i in range(new_length)])))
         if jitter > 0:
             np.random.seed(seed)
             jitter_offsets = np.random.randint(-jitter, jitter, len(frame_idxs))

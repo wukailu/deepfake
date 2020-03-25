@@ -1,8 +1,14 @@
 import torch
 from torch import Tensor
 import numpy as np
-from torch.utils.tensorboard import SummaryWriter
 from sklearn.metrics import log_loss
+
+
+def all_sum(tensor):
+    import torch.distributed as dist
+    rt = tensor.clone()  # The function operates in-place.
+    dist.all_reduce(rt, op=dist.ReduceOp.SUM)
+    return rt
 
 
 class Unnormalize:
@@ -19,10 +25,10 @@ class Unnormalize:
         return torch.clamp(tensor * std + mean, 0., 1.)
 
 
-class Classification_Meter:
+class DistributedClassificationMeter:
     """A meter to keep track of iou and dice scores throughout an epoch"""
 
-    def __init__(self, writer, phase: str, epoch: int):
+    def __init__(self, writer, phase: str, epoch: int, workers, criterion):
         self.pos_loss = []
         self.neg_loss = []
         self.loss = []
@@ -33,29 +39,33 @@ class Classification_Meter:
         self.writer = writer
         self.epoch = epoch
         self.phase = phase
+        self.workers = workers
+        self.criterion = criterion
 
-    def update(self, targets: Tensor, outputs: Tensor, loss: float):
-        try:
-            predicts = torch.sigmoid(outputs).numpy().clip(1e-6, 1 - 1e-6)
-            targets = targets.numpy()
-            acc = ((predicts > 0.5) == targets).sum().item() / len(predicts)
-            pos_p, pos_l = predicts[targets == 0], targets[targets == 0]
-            neg_p, neg_l = predicts[targets == 1], targets[targets == 1]
-            pos_acc = ((pos_p > 0.5) == pos_l).sum().item() / len(pos_p)
-            neg_acc = ((neg_p > 0.5) == neg_l).sum().item() / len(neg_p)
-            neg_loss = log_loss(neg_l, neg_p, labels=[0, 1])
-            pos_loss = log_loss(pos_l, pos_p, labels=[0, 1])
-            confidence = np.min([predicts, 1 - predicts], 0).mean()
+    def update(self, targets: Tensor, outputs: Tensor, loss: Tensor):
+        targets = targets.cuda()
+        outputs = outputs.cuda()
+        loss = loss.cuda()
+        # try:
+        predicts = torch.sigmoid(outputs).clamp(1e-6, 1 - 1e-6)
+        acc = ((predicts > 0.5) == targets).sum().float() / len(predicts)
+        pos_p, pos_l = predicts[targets == 0], targets[targets == 0]
+        neg_p, neg_l = predicts[targets == 1], targets[targets == 1]
+        pos_acc = ((pos_p > 0.5) == pos_l).sum().float() / len(pos_p)
+        neg_acc = ((neg_p > 0.5) == neg_l).sum().float() / len(neg_p)
+        neg_loss = self.criterion(neg_p, neg_l)
+        pos_loss = self.criterion(pos_p, pos_l)
+        confidence = (torch.min(predicts, 1 - predicts)).mean()
 
-            self.loss.append(loss)
-            self.acc.append(acc)
-            self.neg_loss.append(neg_loss)
-            self.pos_loss.append(pos_loss)
-            self.confidence.append(confidence)
-            self.pos_acc.append(pos_acc)
-            self.neg_acc.append(neg_acc)
-        except:
-            pass
+        self.loss.append(all_sum(loss).item()/self.workers)
+        self.acc.append(all_sum(acc).item()/self.workers)
+        self.neg_loss.append(all_sum(neg_loss).item()/self.workers)
+        self.pos_loss.append(all_sum(pos_loss).item()/self.workers)
+        self.confidence.append(all_sum(confidence).item()/self.workers)
+        self.pos_acc.append(all_sum(pos_acc).item()/self.workers)
+        self.neg_acc.append(all_sum(neg_acc).item()/self.workers)
+        # except:
+        #     pass
 
     def log_metric(self, write_scalar=True):
         loss = np.nanmean(self.loss)

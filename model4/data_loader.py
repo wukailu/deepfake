@@ -8,6 +8,8 @@ from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
 from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
+import settings
 import random
 import os
 
@@ -44,6 +46,8 @@ class DFDCDataset(Dataset):
         self.transform = transform
         self.same_transform = params['same_transform']
         self.diff = diff
+        self.use_diff = params["img_diff"]
+        self.smooth = params["smooth"]
 
         self.video_path = pathlib.Path(params['data_path'])
         self.cached_path = pathlib.Path(params['cache_path'])
@@ -75,8 +79,8 @@ class DFDCDataset(Dataset):
         face1 = self._get_png(file_path1)
         face2 = self._get_png(file_path2)
 
-        if augment and np.random.rand() < 4/7:
-            if np.random.rand() < 1/2:
+        if augment and np.random.rand() < 4 / 7:
+            if np.random.rand() < 1 / 2:
                 face1 = Image.fromarray(self.trans1(**{"image": np.array(face1)})["image"])
                 face2 = Image.fromarray(self.trans1(**{"image": np.array(face2)})["image"])
             else:
@@ -88,17 +92,23 @@ class DFDCDataset(Dataset):
         image1 = self.transform(face1)
         random.seed(seed)
         image2 = self.transform(face2)
-        return image1-image2, (file_path1, file_path2)
+        if self.use_diff:
+            return image1 - image2, (file_path1, file_path2)
+        else:
+            return image1, file_path1
 
     def _get_fake(self, real_fn, inter=1):
         fake_fn = np.random.choice(self.real2fakes[real_fn])
         fold = np.random.choice(os.listdir(self.cached_path / fake_fn.split(".")[0]))
         ids = [int(x.split(".")[0]) for x in os.listdir(self.cached_path / fake_fn.split(".")[0] / fold)]
         ids = [i for i in ids if (i + inter) in ids]
-        file = str(np.random.choice(ids))+".png"
-        key = str((fake_fn.split(".")[0], int(fold), file))
-        diff = self.diff.at[key, "diff"]
-        if diff < 0.01:
+        file = str(np.random.choice(ids)) + ".png"
+        try:
+            key = str((fake_fn.split(".")[0], int(fold), file))
+            diff = self.diff.at[key, "diff"]
+        except:
+            diff = 100
+        if diff < 0:
             raise ValueError("it's not a fake")
         return fake_fn, fold, int(file.split(".")[0])
 
@@ -114,10 +124,10 @@ class DFDCDataset(Dataset):
             except (KeyError, ValueError, FileNotFoundError) as e:
                 pass
         try:
-            real_path1 = self.cached_path / real_fn.split('.')[0] / fold / (str(file)+".png")
-            real_path2 = self.cached_path / real_fn.split('.')[0] / fold / (str(file+inter) + ".png")
-            fake_path1 = self.cached_path / fake_fn.split('.')[0] / fold / (str(file)+".png")
-            fake_path2 = self.cached_path / fake_fn.split('.')[0] / fold / (str(file+inter) + ".png")
+            real_path1 = self.cached_path / real_fn.split('.')[0] / fold / (str(file) + ".png")
+            real_path2 = self.cached_path / real_fn.split('.')[0] / fold / (str(file + inter) + ".png")
+            fake_path1 = self.cached_path / fake_fn.split('.')[0] / fold / (str(file) + ".png")
+            fake_path2 = self.cached_path / fake_fn.split('.')[0] / fold / (str(file + inter) + ".png")
             if self.same_transform:
                 temp_seed = np.random.randint(0, 2e9)
                 random.seed(temp_seed)
@@ -128,9 +138,9 @@ class DFDCDataset(Dataset):
                 real_image, real_file = self.__get_transformed_face(real_path1, real_path2, augment=(inter == 1))
                 fake_image, fake_file = self.__get_transformed_face(fake_path1, fake_path2, augment=(inter == 1))
 
-            return {'real': real_image, 'fake': fake_image, 'real_file': real_file, 'fake_file': fake_file}
+            return {'real': real_image, 'fake': fake_image, 'real_file': real_file, 'fake_file': fake_file, 'smooth':self.smooth}
         except (IOError, KeyError, NameError) as e:
-            return {'real': None, 'fake': None, 'real_file': None, 'fake_file': None}
+            return {'real': None, 'fake': None, 'real_file': None, 'fake_file': None, 'smooth': 0}
 
 
 def get_transforms(params, image_size=224):
@@ -195,14 +205,17 @@ def create_dataloaders(params: dict):
     diff = pd.read_csv(params["diff_path"], index_col=[0])
 
     loader = 8
-    train_dl = _create_dataloader(metadata[metadata['split_kailu'] == 'train'], bbox, params, train_transforms,
-                                  val_data_filter, diff, shuffle=True, num_workers=loader)
-    val_dl = _create_dataloader(metadata[metadata['split_kailu'] == 'validation'], bbox, params, val_transforms,
-                                val_data_filter, diff, shuffle=False, num_workers=loader, repeate=1)
-    test_dl = _create_dataloader(metadata[metadata['split_kailu'] == 'test'], bbox, params, val_transforms,
-                                 val_data_filter, diff, shuffle=False, num_workers=loader)
+    train_dl, train_sampler = _create_dataloader(metadata[metadata['split_kailu'] == 'train'], bbox, params,
+                                                 train_transforms,
+                                                 train_data_filter, diff, shuffle=True, num_workers=loader)
+    val_dl, val_sampler = _create_dataloader(metadata[metadata['split_kailu'] == 'validation'], bbox, params,
+                                             val_transforms,
+                                             train_data_filter, diff, shuffle=False, num_workers=loader, repeate=1)
+    test_dl, test_sampler = _create_dataloader(metadata[metadata['split_kailu'] == 'test'], bbox, params,
+                                               val_transforms,
+                                               val_data_filter, diff, shuffle=False, num_workers=loader)
 
-    return train_dl, val_dl, test_dl, iter(val_dl)
+    return train_dl, val_dl, test_dl, iter(val_dl), train_sampler, val_sampler
 
 
 def _create_dataloader(metadata: DataFrame, bbox: DataFrame, params: dict, transform, data_filter, diff,
@@ -213,8 +226,9 @@ def _create_dataloader(metadata: DataFrame, bbox: DataFrame, params: dict, trans
                      diff=diff)
     if repeate > 1:
         ds = torch.utils.data.ConcatDataset([ds] * repeate)
-    dl = DataLoader(ds, batch_size=params['batch_size'], num_workers=num_workers, shuffle=shuffle,
-                    collate_fn=collate_fn, drop_last=True)
 
+    sampler = DistributedSampler(ds)
+    dl = DataLoader(ds, batch_size=params['batch_size'], num_workers=num_workers, shuffle=False,
+                    collate_fn=collate_fn, drop_last=True, sampler=sampler)
     print(f"data: {len(ds)}")
-    return dl
+    return dl, sampler

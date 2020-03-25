@@ -104,7 +104,7 @@ class Trainer(object):
         if selection_metric <= self.best_metric:
             self.best_metric = selection_metric
             print(f'>>> Saving best model metric={selection_metric:.4f}')
-            checkpoint = {'model': self.model, 'optimizer': self.optimizer.state_dict()}
+            checkpoint = {'model': self.model}
             torch.save(checkpoint, 'checkpoints/best_model.pth')
             if settings.USE_FOUNDATIONS:
                 foundations.save_artifact('checkpoints/best_model.pth', key='best_model_checkpoint')

@@ -17,13 +17,12 @@ def print_model_params(model):
     
 
 def get_trainable_params(model):
-    print("Params to learn:")
     params_to_update = []
     for name, param in model.named_parameters():
         if param.requires_grad:
             # print("\t", repr(name))
             params_to_update.append(param)
-            
+    print("number layers to learn:", len(params_to_update))
     return params_to_update
 
 
@@ -73,38 +72,44 @@ def freeze_resnet(model, params):
     return model, params
 
 
-def create_model(use_hidden_layer, dropout, backbone, params):
+def create_model(use_hidden_layer, dropout, backbone, params, pretrain=True):
     if backbone == 1:
-        model = models.resnet18(pretrained=True)
+        model = models.resnet18(pretrained=pretrain)
         model.fc = get_classifier(model.fc.in_features, use_hidden_layer, dropout)
         params['batch_size'] = 256
         model, params = freeze_resnet(model, params)
     elif backbone == 2:
-        model = models.resnet34(pretrained=True)
+        model = models.resnet34(pretrained=pretrain)
         model.fc = get_classifier(model.fc.in_features, use_hidden_layer, dropout)
         model, params = freeze_resnet(model, params)
     elif backbone == 3:
-        model = models.resnet50(pretrained=True)
+        model = models.resnet50(pretrained=pretrain)
         model.fc = get_classifier(model.fc.in_features, use_hidden_layer, dropout)
         model, params = freeze_resnet(model, params)
     elif backbone == 4:
-        model = models.resnet101(pretrained=True)
+        model = models.resnet101(pretrained=pretrain)
         model.fc = get_classifier(model.fc.in_features, use_hidden_layer, dropout)
         model, params = freeze_resnet(model, params)
         # 1 or 2 is better than 0
     elif backbone == 5:
-        model = models.densenet121(pretrained=True)
+        model = models.densenet121(pretrained=pretrain)
         model.classifier = get_classifier(model.classifier.in_features, use_hidden_layer, dropout)
         # TODO: update freeze
         params['freeze'] = 0
     elif backbone == 6:
-        model = EfficientNet.from_pretrained('efficientnet-b1', num_classes=23)
+        if pretrain:
+            model = EfficientNet.from_pretrained('efficientnet-b1', num_classes=23)
+        else:
+            model = EfficientNet.from_name('efficientnet-b1')
         model._dropout = nn.Dropout(0)
         model._fc = get_classifier(model._fc.in_features, use_hidden_layer, dropout)
         # TODO: update freeze
         params['freeze'] = 0
     elif backbone == 7:
-        model = EfficientNet.from_pretrained('efficientnet-b4', num_classes=23)
+        if pretrain:
+            model = EfficientNet.from_pretrained('efficientnet-b4', num_classes=23)
+        else:
+            model = EfficientNet.from_name('efficientnet-b4')
         model._dropout = nn.Dropout(0)
         model._fc = get_classifier(model._fc.in_features, use_hidden_layer, dropout)
         if params['freeze'] != 0:
@@ -112,23 +117,23 @@ def create_model(use_hidden_layer, dropout, backbone, params):
             freeze_until(model, f"_blocks.{freeze}._expand_conv.weight")
             params['freeze'] = int(freeze)
     elif backbone == 8:
-        model = EfficientNet.from_pretrained('efficientnet-b7', num_classes=23)
+        if pretrain:
+            model = EfficientNet.from_pretrained('efficientnet-b7', num_classes=23)
+        else:
+            model = EfficientNet.from_name('efficientnet-b7')
         model._dropout = nn.Dropout(0)
         model._fc = get_classifier(model._fc.in_features, use_hidden_layer, dropout)
         params['batch_size'] = params['batch_size'] // 2
         # TODO: update freeze
         params['freeze'] = 0
     elif backbone == 9:
-        model = models.resnext50_32x4d(pretrained=True)
+        model = models.resnext50_32x4d(pretrained=pretrain)
         model.fc = get_classifier(model.fc.in_features, use_hidden_layer, dropout)
         model, params = freeze_resnet(model, params)
     else:
-        print("Unrecognized model name, using resnet18")
-        model = models.resnet18(pretrained=True)
-        model.fc = get_classifier(model.fc.in_features, use_hidden_layer, dropout)
-        model, params = freeze_resnet(model, params)
+        raise NotImplementedError()
 
     # print(model)
-    model = model.cuda()
+    # model = model.cuda()
     return model, params
 
