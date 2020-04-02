@@ -67,7 +67,7 @@ class FullVideoReader:
 
 
 class VideoDataset(Dataset):
-    def __init__(self, video_paths, sample_rate, video_reader, new_length=1, with_id = False):
+    def __init__(self, video_paths, sample_rate, video_reader, new_length=1, with_id=False):
         self.paths = video_paths
         self.sample_rate = sample_rate
         self.video_reader = video_reader
@@ -84,7 +84,7 @@ class VideoDataset(Dataset):
         elif len(frames) == 0 and self.with_id:
             return np.array([]), []
         samples = np.linspace(0, len(frames) - self.new_length, self.sample_rate).round().astype(int)
-        samples = np.array(sorted(np.concatenate([samples+i for i in range(self.new_length)])))
+        samples = np.array(sorted(np.concatenate([samples + i for i in range(self.new_length)])))
         if self.with_id:
             return frames[samples], samples
         else:
@@ -322,7 +322,7 @@ class BlazeFace_extractor(Face_extractor):
 class Inference_model:
     def __init__(self, batch_size=32, mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)):
         self.pre_mean, self.pre_std = mean, std
-        self.transform = Compose([Resize(224), ToTensor(), Normalize(self.pre_mean, self.pre_std)])
+        self.transform = Compose([Resize(224), ToTensor(), Normalize(self.pre_mean, self.pre_std)])  # , CenterErase()
         self.batch_size = 32
         pass
 
@@ -359,6 +359,17 @@ class Inference_model:
         for start in range(0, len(batch), self.batch_size):
             ret.extend(self.predict_batch(batch[start:start + self.batch_size]))
         return np.array(ret)
+
+
+class CenterErase(object):
+    def __init__(self, size=100):
+        self.padding = size // 2
+
+    def __call__(self, img):
+        import torchvision.transforms.functional as F
+        img_c, img_h, img_w = img.shape
+        return F.erase(img, img_h // 2 - self.padding, img_w // 2 - self.padding, img_h // 2 + self.padding,
+                       img_w // 2 + self.padding, 0, False)
 
 
 class FaceInferenceModel(Inference_model):
@@ -398,6 +409,9 @@ class FaceInferenceModel(Inference_model):
         result = self._ensemble(
             [np.max([self._ensemble([output[tta] for tta in face]) for face in frame]) for frame in image_id])
         return result
+
+    def test_model(self, shape=(1, 3, 224, 224)):
+        self.predict_batch(torch.zeros(shape))
 
 
 def inter(box1, box2):
@@ -487,6 +501,10 @@ class MultiFrameModel(Inference_model):
         result = np.max(
             [self._ensemble([self._ensemble([output[i] for i in ttas_]) for ttas_ in ids_]) for ids_ in image_id])
         return result
+
+    def test_model(self, shape=(10, 1920, 1080, 3)):
+        shape = (self.batch_size, self.num_frames, 3, 224, 224)
+        self.predict_batch(torch.zeros(shape))
 
 
 def show(images):

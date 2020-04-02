@@ -112,12 +112,12 @@ def train(train_dl, val_dl, test_dl, val_dl_iter, model, optimizer, scheduler, c
         writer = None
 
     for epoch in range(n_epochs):
-        train_records = DistributedClassificationMeter(writer=writer, phase="train", epoch=epoch, workers=2, criterion=criterion)
+        train_records = DistributedClassificationMeter(writer=writer, phase="train", epoch=epoch, workers=params["gpus"], criterion=criterion)
         if train_sampler:
             train_sampler.set_epoch(epoch)
         train_one_epoch(epoch, model, train_dl, max_lr, optimizer, criterion, scheduler, train_records, batch_repeat, rank, writer, params)
         if epoch % val_rate == 0:
-            val_records = DistributedClassificationMeter(writer=writer, phase="validation", epoch=epoch, workers=2, criterion=criterion)
+            val_records = DistributedClassificationMeter(writer=writer, phase="validation", epoch=epoch, workers=params["gpus"], criterion=criterion)
             if val_sampler:
                 val_sampler.set_epoch(epoch)
             validate(model, val_dl, criterion, val_records, rank)
@@ -127,7 +127,7 @@ def train(train_dl, val_dl, test_dl, val_dl_iter, model, optimizer, scheduler, c
             info = val_records.log_metric(write_scalar=False)
             selection_metric = info["acc"]
 
-            if selection_metric >= best_metric and rank == 0 and info["confidence"] < 7:
+            if selection_metric >= best_metric and rank == 0:
                 best_metric = selection_metric
                 print(
                     f'>>> Saving best model metric={selection_metric:.4f} compared to previous best {best_metric:.4f}')

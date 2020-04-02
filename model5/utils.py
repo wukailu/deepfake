@@ -36,6 +36,8 @@ class DistributedClassificationMeter:
         self.pos_acc = []
         self.neg_acc = []
         self.confidence = []
+        self.bias = []
+        self.mean = []
         self.writer = writer
         self.epoch = epoch
         self.phase = phase
@@ -48,7 +50,9 @@ class DistributedClassificationMeter:
         loss = loss.cuda()
         # try:
         predicts = torch.sigmoid(outputs).clamp(1e-6, 1 - 1e-6)
+        mean = predicts.mean()
         acc = ((predicts > 0.5) == targets).sum().float() / len(predicts)
+        bias = 1 - torch.logical_xor((predicts > 0.5)[:len(predicts)//2], (predicts > 0.5)[len(predicts)//2:]).float().mean()
         pos_p, pos_l = predicts[targets == 0], targets[targets == 0]
         neg_p, neg_l = predicts[targets == 1], targets[targets == 1]
         pos_acc = ((pos_p > 0.5) == pos_l).sum().float() / len(pos_p)
@@ -64,6 +68,8 @@ class DistributedClassificationMeter:
         self.confidence.append(all_sum(confidence).item()/self.workers)
         self.pos_acc.append(all_sum(pos_acc).item()/self.workers)
         self.neg_acc.append(all_sum(neg_acc).item()/self.workers)
+        self.bias.append(all_sum(bias).item()/self.workers)
+        self.mean.append(all_sum(mean).item() / self.workers)
         # except:
         #     pass
 
@@ -75,9 +81,11 @@ class DistributedClassificationMeter:
         pos_acc = np.nanmean(self.pos_acc)
         neg_acc = np.nanmean(self.neg_acc)
         confidence = 1 / np.nanmean(self.confidence)
+        bias = np.nanmean(self.bias)
+        mean = np.nanmean(self.mean)
 
         ret = {"acc": acc, "loss": loss, "neg_loss": neg_loss, "pos_loss": pos_loss, "confidence": confidence,
-               "pos_acc": pos_acc, "neg_acc": neg_acc}
+               "pos_acc": pos_acc, "neg_acc": neg_acc, "bias": bias, 'mean': mean}
 
         if self.writer and write_scalar:
             for key, value in ret.items():

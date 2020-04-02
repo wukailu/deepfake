@@ -89,7 +89,16 @@ model = DDP(model, delay_allreduce=True)
 # model = DDP(model)
 
 # Learning rate scheme
-scheduler = None
+if params['use_lr_scheduler'] == 0:
+    scheduler = None
+elif params['use_lr_scheduler'] == 1:
+    scheduler = lr_scheduler.ExponentialLR(optimizer, gamma=params['scheduler_gamma'])
+elif params['use_lr_scheduler'] == 2:
+    scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
+elif params['use_lr_scheduler'] == 3:
+    scheduler = lr_scheduler.StepLR(optimizer, step_size=100, gamma=0.1)
+else:
+    scheduler = None
 
 if rank == 0:
     print('Creating datasets')

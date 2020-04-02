@@ -48,6 +48,7 @@ class DFDCDataset(Dataset):
         self.diff = diff
         self.use_diff = params["img_diff"]
         self.smooth = params["smooth"]
+        self.fix_fake = params["fix_fake"]
 
         self.video_path = pathlib.Path(params['data_path'])
         self.cached_path = pathlib.Path(params['cache_path'])
@@ -58,6 +59,11 @@ class DFDCDataset(Dataset):
         for fn, row in metadata.iterrows():
             if row['label'] == 'FAKE' and row['original'] in filename_set:
                 self.real2fakes[row['original']].append(fn)
+
+        if self.fix_fake == 1:
+            for key in self.real2fakes.keys():
+                if len(self.real2fakes[key]) > 0:
+                    self.real2fakes[key] = np.random.choice(self.real2fakes[key])
 
         import albumentations as aug
         self.trans1 = aug.Downscale(0.5, 0.5, p=1)
@@ -98,7 +104,10 @@ class DFDCDataset(Dataset):
             return image1, file_path1
 
     def _get_fake(self, real_fn, inter=1):
-        fake_fn = np.random.choice(self.real2fakes[real_fn])
+        if self.fix_fake == 1:
+            fake_fn = self.real2fakes[real_fn]
+        else:
+            fake_fn = np.random.choice(self.real2fakes[real_fn])
         fold = np.random.choice(os.listdir(self.cached_path / fake_fn.split(".")[0]))
         ids = [int(x.split(".")[0]) for x in os.listdir(self.cached_path / fake_fn.split(".")[0] / fold)]
         ids = [i for i in ids if (i + inter) in ids]
@@ -138,7 +147,8 @@ class DFDCDataset(Dataset):
                 real_image, real_file = self.__get_transformed_face(real_path1, real_path2, augment=(inter == 1))
                 fake_image, fake_file = self.__get_transformed_face(fake_path1, fake_path2, augment=(inter == 1))
 
-            return {'real': real_image, 'fake': fake_image, 'real_file': real_file, 'fake_file': fake_file, 'smooth':self.smooth}
+            return {'real': real_image, 'fake': fake_image, 'real_file': real_file, 'fake_file': fake_file,
+                    'smooth': self.smooth}
         except (IOError, KeyError, NameError) as e:
             return {'real': None, 'fake': None, 'real_file': None, 'fake_file': None, 'smooth': 0}
 
@@ -205,21 +215,36 @@ def create_dataloaders(params: dict):
     diff = pd.read_csv(params["diff_path"], index_col=[0])
 
     loader = 8
-    train_dl, train_sampler = _create_dataloader(metadata[metadata['split_kailu'] == 'train'], bbox, params,
-                                                 train_transforms,
-                                                 train_data_filter, diff, shuffle=True, num_workers=loader)
-    val_dl, val_sampler = _create_dataloader(metadata[metadata['split_kailu'] == 'validation'], bbox, params,
-                                             val_transforms,
-                                             train_data_filter, diff, shuffle=False, num_workers=loader, repeate=1)
-    test_dl, test_sampler = _create_dataloader(metadata[metadata['split_kailu'] == 'test'], bbox, params,
-                                               val_transforms,
-                                               val_data_filter, diff, shuffle=False, num_workers=loader)
+    if params["all_data"] == 1:
+        print("using val filter for train and val")
+        print("using all data")
+        val_data = metadata[metadata["label"] == 'REAL'].sample(100)
+        val_index = val_data.index
+        val_data = metadata[metadata.index.isin(val_index) | metadata["original"].isin(val_index)]
+        train_data = metadata.drop(val_data.index)
+    elif params["all_data"] == 0:
+        train_data = metadata[metadata['split_kailu'] == 'train']
+        val_data = metadata[metadata['split_kailu'] == 'validation']
+    elif params["all_data"] == 2:
+        print("using val filter for train and val")
+        print("using all data except val")
+        val_data = metadata[metadata['split_kailu'] == 'validation']
+        train_data = metadata[metadata['split_kailu'] != 'validation']
 
+    train_dl, train_sampler = _create_dataloader(train_data, bbox, params,
+                                                 train_transforms, val_data_filter, diff, shuffle=True,
+                                                 num_workers=loader, batch_size=params['batch_size'], drop_last=True)
+    val_dl, val_sampler = _create_dataloader(val_data, bbox, params,
+                                             val_transforms, val_data_filter, diff, shuffle=False, num_workers=loader,
+                                             repeate=1, batch_size=params['batch_size'] // 3, drop_last=False)
+    test_dl, test_sampler = _create_dataloader(metadata[metadata['split_kailu'] == 'test'], bbox, params,
+                                               val_transforms, val_data_filter, diff, shuffle=False, num_workers=loader,
+                                               batch_size=params['batch_size'], drop_last=False)
     return train_dl, val_dl, test_dl, iter(val_dl), train_sampler, val_sampler
 
 
 def _create_dataloader(metadata: DataFrame, bbox: DataFrame, params: dict, transform, data_filter, diff,
-                       num_workers=4, shuffle=True, repeate=1):
+                       num_workers=4, shuffle=True, repeate=1, batch_size=32, drop_last=True):
     assert len(metadata) != 0, f'metadata are empty'
 
     ds = DFDCDataset(metadata=metadata, bbox=bbox, params=params, transform=transform, data_filter=data_filter,
@@ -228,7 +253,7 @@ def _create_dataloader(metadata: DataFrame, bbox: DataFrame, params: dict, trans
         ds = torch.utils.data.ConcatDataset([ds] * repeate)
 
     sampler = DistributedSampler(ds)
-    dl = DataLoader(ds, batch_size=params['batch_size'], num_workers=num_workers, shuffle=False,
-                    collate_fn=collate_fn, drop_last=True, sampler=sampler)
+    dl = DataLoader(ds, batch_size=batch_size, num_workers=num_workers, shuffle=False,
+                    collate_fn=collate_fn, drop_last=drop_last, sampler=sampler)
     print(f"data: {len(ds)}")
     return dl, sampler

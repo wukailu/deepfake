@@ -52,6 +52,11 @@ class DFDCVideoDataset(Dataset):
         self.video_path = pathlib.Path(params['data_path'])
         self.cached_path = pathlib.Path(params['cache_path'])
         self.cached_path.mkdir(exist_ok=True)
+        self.data_dropout = params['data_dropout']
+        self.input_mix = params['input_mix']
+
+        np.random.shuffle(self.real_filename)
+        self.real_filename = self.real_filename[:int(len(self.real_filename)*(1-self.data_dropout))]
 
         self.real2fakes = {fn: [] for fn in self.real_filename}
         filename_set = set(self.real_filename)
@@ -117,6 +122,10 @@ class DFDCVideoDataset(Dataset):
             real_image, real_file = self._read_frames(real_fn, frames)
             fake_image, fake_file = self._read_frames(fake_fn, frames)
 
+            if np.random.rand() < self.input_mix:
+                real_image = (real_image + fake_image)/2
+                fake_image = real_image
+
             return {'real': real_image, 'fake': fake_image, 'real_file': real_file, 'fake_file': fake_file, 'smooth': self.smooth}
         except (IOError, KeyError) as e:
             # print(e)
@@ -173,18 +182,20 @@ def create_dataloaders(params: dict, mean=(0.485, 0.456, 0.406), std=(0.229, 0.2
     train_transforms, val_transforms = get_transforms(params, image_size, mean, std)
     metadata = pd.read_json(params['metadata_path']).T
     loader = 8
-    train_dl, sampler = _create_dataloader(metadata[metadata['split_kailu'] == 'train'], params, train_transforms,
-                                  train_data_filter, shuffle=True, num_workers=loader)
+    # metadata[metadata['split_kailu'] == 'train']
+    print("training on all the data")
+    train_dl, sampler = _create_dataloader(metadata, params, train_transforms,
+                                  val_data_filter, shuffle=True, num_workers=loader, batch_size=params['batch_size'])
     val_dl, val_sampler = _create_dataloader(metadata[metadata['split_kailu'] == 'validation'], params, val_transforms,
-                                train_data_filter, shuffle=False, num_workers=loader)
+                                val_data_filter, shuffle=False, num_workers=loader, batch_size=params['batch_size']//3)
     test_dl, _ = _create_dataloader(metadata[metadata['split_kailu'] == 'test'], params, val_transforms,
-                                 val_data_filter, shuffle=False, num_workers=loader)
+                                 val_data_filter, shuffle=False, num_workers=loader, batch_size=params['batch_size'])
 
     return train_dl, val_dl, test_dl, sampler, val_sampler
 
 
 def _create_dataloader(metadata: DataFrame, params: dict, transform, data_filter,
-                       num_workers=4, shuffle=True, repeate=1):
+                       num_workers=4, shuffle=True, repeate=1, batch_size=32):
     assert len(metadata) != 0, f'metadata are empty'
 
     ds = DFDCVideoDataset(metadata=metadata, params=params, transform=transform, data_filter=data_filter,
@@ -193,7 +204,7 @@ def _create_dataloader(metadata: DataFrame, params: dict, transform, data_filter
         ds = torch.utils.data.ConcatDataset([ds] * repeate)
 
     sampler = DistributedSampler(ds)
-    dl = DataLoader(ds, batch_size=params['batch_size'], num_workers=num_workers, shuffle=shuffle,
+    dl = DataLoader(ds, batch_size=batch_size, num_workers=num_workers, shuffle=shuffle,
                     collate_fn=collate_fn, drop_last=True)
 
     print(f"data: {len(ds)}")

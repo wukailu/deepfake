@@ -1,6 +1,6 @@
 # Project config #
-#project_name: 'DFDC_Image_model4_all_singleface'
-project_name: 'Model1'
+project_name: 'DFDC_Image_model4_all_face_full_data'
+#project_name: 'Model1'
 log_level: INFO
 
 # Worker config #
